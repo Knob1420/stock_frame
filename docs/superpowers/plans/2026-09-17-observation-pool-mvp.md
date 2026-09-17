@@ -15,7 +15,7 @@
 - 一切 Python 命令用 `/home/admin/stock_selection/.venv/bin/python`（系统 python 无依赖）
 - 仓库根：`/home/admin/stock_selection`；pytest 从仓库根跑：`cd /home/admin/stock_selection && .venv/bin/python -m pytest pool/tests -q`
 - 结案口径：hit `max_up ≥ +8%` / miss `min_dn ≤ −5%` / flat 窗口 10 交易日到期；T+1 起算；同日双触发按 miss；判定用后复权比例；trade 标注用现价
-- parquet 口径：`open/high/low/close/volume` 为**后复权**；`factor` 复权因子（现价 = close/factor）；`amount` 真实成交额（元）
+- parquet 口径：`open/high/low/close` 为**后复权**；`factor` 复权因子（**现价 = close/factor**）；`volume` 已被源数据按 1/factor 预调整（勿再除）；**真实成交额(元) = amount × 1000**（amount 即真实成交额千元——2026-09-17 Task 7 以茅台外部真值三重验证更正，旧口径 `÷factor×1000` 系双重校正，已废）
 - 主板白名单：文件名匹配 `^(sh60|sz00)`（含 sz000/001/002/003；天然排除 sh00 指数族与 sz39 指数族）
 - `cfg_version = "kdj-default-" + md5(json.dumps(DEFAULT_CFG, sort_keys=True))[:8]`；复盘/查表只认当前版本
 - 池模块禁止 import qlib、禁止读 qlib_bin 二进制；唯一例外：读 `calendars/day.txt` 文本
@@ -930,7 +930,7 @@ def collect_candidates(parq_dir=None, expected_date=None, signal_fn=None, tail=T
             cur = g["close"].iloc[-1]
             cands.append({"sym": sym, "date": g.index[-1], "close": float(cur),
                           "prev_close": float(prev), "chg": float(cur / prev - 1),
-                          "amount": float(df["amount"].iloc[-1]),
+                          "amount": float(df["amount"].iloc[-1] / df["factor"].iloc[-1] * 1000),
                           "feats": {k: (float(v) if v == v else None)
                                     for k, v in feature_series(g).items()}})
         except Exception as e:                                  # 单票异常不炸整体
@@ -1204,7 +1204,7 @@ def snapshot(code, date=None):
             "close": float(df["close"].iloc[i]),
             "raw_close": float(df["close"].iloc[i] / df["factor"].iloc[i]),
             "chg": float(df["close"].iloc[i] / prev - 1),
-            "amount": float(df["amount"].iloc[i]),
+            "amount": float(df["amount"].iloc[i] / df["factor"].iloc[i] * 1000),
             "env": "牛性" if bull else "熊性", "feats": feats,
             "ma240": float(df["ma240"].iloc[i]) if "ma240" in df else None,
             "boll_mid": float(df["boll_mid"].iloc[i]) if "boll_mid" in df else None,
@@ -1353,3 +1353,95 @@ git commit -m "feat: 观察池AI对话skill(研究/入池/复盘/标注)+模块R
 - **口径修正**（对 spec 的实现级细化）：成交额用原生 `amount`（弃"现价×量近似"）；现价=close/factor；桶排序中位数取"n≥30 桶的 win_rate 中位"
 - **已知限制**（记录进 README）：sh000300 指数数据滞后一天（env 标签慢一天，可接受）；outcome.days 对停牌票可能少计（信息性字段）；本地无股票名源
 - **类型一致性**：track(entry, bars, n_elapsed) 在 Task 3 定义、Task 6 `_tracking_bars` 按此产出 ✓；bucket_key 三元组→"|".join 为 JSON 键，screen 读 `c["bucket"]` 同构 ✓
+
+---
+
+### Task 3a: 极值日期戳增量（2026-09-17 用户需求，对已完成 Task 3 的增量）
+
+**Files:**
+- Modify: `pool/pool.py`（track 循环 + 新字段）
+- Test: `pool/tests/test_pool_state.py`（追加 2 个测试）
+
+**Interfaces:**
+- Consumes: Task 3 全部（track/add_entry 语义不变）
+- Produces: entry 新增 4 字段：`max_up_day`/`max_up_date`/`min_dn_day`/`min_dn_date`——`*_day` 为自 T+1 起的交易日序号（1 基），`*_date` 为该日日期；极值被严格超越刷新时同步更新；结案冻结；幂等（≤last_date 的 bar 本就跳过）
+
+- [ ] **Step 1: 追加失败测试（test_pool_state.py）**
+
+```python
+def test_extreme_day_stamps_follow_refresh():
+    e = mk_entry()
+    bars = [bar(D[1], 10.2, 9.9, 10.1),      # day1: max_up 2%
+            bar(D[2], 10.1, 9.7, 10.0),      # day2: min_dn 3%(不触发)
+            bar(D[3], 10.5, 9.95, 10.4)]     # day3: max_up 刷新 5%
+    P.track(e, bars, n_elapsed=3)
+    assert e["max_up_day"] == 3 and e["max_up_date"] == D[2 + 1]
+    assert e["min_dn_day"] == 2 and e["min_dn_date"] == D[1 + 1]
+    P.track(e, bars, n_elapsed=3)             # 重跑 → 戳不动
+    assert e["max_up_day"] == 3
+
+
+def test_new_entry_extreme_fields_init_null():
+    pool = {"version": 1, "pool": []}
+    e = P.add_entry(pool, "000651", "", "", [], {}, 10.0, D[0], [D[0]], cfg_version())
+    for k in ("max_up_day", "max_up_date", "min_dn_day", "min_dn_date"):
+        assert e[k] is None
+```
+
+- [ ] **Step 2: RED** — `.venv/bin/python -m pytest pool/tests/test_pool_state.py -q` 两新测试失败（KeyError: max_up_day）
+
+- [ ] **Step 3: 实现**——add_entry 模板加 4 个 None 字段；track 循环把 max()/min() 聚合改为严格超越式更新并盖戳：
+
+```python
+    for d, hi, lo, c in bars:
+        if d <= entry["added"] or (entry["last_date"] and d <= entry["last_date"]):
+            continue
+        entry["days"] += 1
+        up, dn = hi / base - 1, lo / base - 1
+        if up > entry["max_up"]:
+            entry["max_up"] = up
+            entry["max_up_day"], entry["max_up_date"] = entry["days"], d
+        if dn < entry["min_dn"]:
+            entry["min_dn"] = dn
+            entry["min_dn_day"], entry["min_dn_date"] = entry["days"], d
+        entry["last_date"], entry["last_close"] = d, c
+        ...（触发判定与结案不变）
+```
+
+注意：days 计数移到极值更新之前（先计本日序号再盖戳）；mk_entry 测试夹具同步加 4 个 None 字段。
+
+- [ ] **Step 4: GREEN + 零回归** — `pool/tests` 全绿、`stockdata/tests pool/tests` 全绿
+- [ ] **Step 5: 提交** `feat: 池卡片记录极值出现日/序号(用户复盘需求)` + 尾注
+
+---
+
+### Task 6b: 卡片现价口径显示（2026-09-17 用户需求）
+
+**原则**:信号/排序/极值/结案比例保持后复权;一切人读价格用现价(=复权价÷当日factor)。
+
+**Files:** Modify `pool/scan.py`(profile_card/日报显示), `pool/pool.py`(add_entry 增可选 add_close_raw), Test: `pool/tests/test_scan_report.py` 追加断言
+
+**改动:**
+1. profile_card 收盘价显示 raw_close;涨跌幅不变
+2. add_entry 增可选参数 add_close_raw(入池日现价,candidates JSON 已有);池内动态"基准"显示它,缺省回退 add_close
+3. last_close 显示当日现价(scan 时现算 close/factor),存储保持后复权
+4. 除权背离提示:显示价差与 max_up/min_dn 背离显著时日报加"期间除权,比例按后复权"注记
+5. 测试:卡片含现价;预置 add_close_raw 的条目显示它
+
+**明示不做**: 前复权 K 线序列变换(复盘画图时另行实现)
+
+---
+
+### Task 6c: 分桶细化 + 涨停口径对称（2026-09-17 用户裁决）
+
+**背景**: 用户质疑判别力——当日环境统一使 8 桶塌缩为 4 个有效桶,桶内仅剩成交额;且"涨停→明天买不进"措辞错误、回放与筛选口径不对称。
+
+**裁决:**
+1. 涨停剔除保留,理由改为"收盘涨停代理(≥9.7%)→次日追高不可操作";**lookup 回放同步跳过信号日涨幅 ≥9.7% 的信号**(统计与筛选口径对称);ST 5% 涨停拦不到维持已知局限
+2. 分桶细化: J 深度 3 档(≤5 / 5~10 / 10~15) × 回撤 3 档(>-10% / -10~-15% / -15~-25%),加牛熊共 18 桶,单日有效 9 桶;外边界仍跟 cfg(J 15 / depth -0.25),超界钳制不变;桶内排序仍按成交额
+3. **lookup 文件名加桶方案版本**:`lookup-<cfg_version>-b2.json`(BUCKET_VER="b2")——桶方案变更不再静默沿用旧表
+
+**Files:** Modify `pool/lookup.py`(bucket_key 分档/J_THR 边界、replay 跳涨停、lookup_path 加 -b2)、`pool/tests/test_lookup.py`(新分档边界/钳制/涨停跳过/文件名)
+**不改:** scan.py(bucket_key 元组 arity 不变,main_scan 拼桶名自动适配)、screen 逻辑、结案语义
+
+**测试要点:** J 5/10 边界落档、dd -10/-15 边界落档、超界钳制、replay 对 chg≥9.7% 信号日返回跳过(build_lookup 计数不含)、文件名含 -b2、旧 8 桶文件(无 -b2)不被 load
