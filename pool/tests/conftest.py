@@ -18,10 +18,11 @@ def make_df(n=600, seed=7, base=10.0):
     close = pd.Series(base + np.cumsum(rng.normal(0, 0.03, n)), index=idx)
     high = close * (1 + rng.uniform(0, 0.02, n))
     low = close * (1 - rng.uniform(0, 0.02, n))
-    vol = pd.Series(rng.uniform(8e6, 3e7, n), index=idx)
+    vol = pd.Series(rng.uniform(2e5, 2e6, n), index=idx)
     j = pd.Series(rng.uniform(0, 100, n), index=idx)
+    # amount=0.1×close×volume(千元)与真实数据恒等式一致:复权价×复权量=真实成交额/1000
     df = pd.DataFrame({"open": close, "high": high, "low": low, "close": close,
-                       "volume": vol, "factor": 1.0, "amount": close * vol,
+                       "volume": vol, "factor": 1.0, "amount": 0.1 * close * vol,
                        "kdj_j": j, "ma240": base * 1.0, "boll_mid": base, "atr14": 0.5,
                        "macd_hist": 0.0})
     return df

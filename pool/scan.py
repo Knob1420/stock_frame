@@ -20,6 +20,7 @@ from pool.lookup import bucket_key, build_lookup, feature_series, load_lookup  #
 
 RAW_COLS = ["open", "high", "low", "close", "volume"]
 MIN_AMOUNT = 2e8          # 流动性:当日成交额(真实,元)
+MAX_PLAUSIBLE_AMOUNT = 5e10  # 单股单日成交额合理上限(元):A股历史无单股日成交超500亿,超之疑源数据异常
 MAX_CHG = 0.097           # 收盘涨停代理(≥9.7% 剔除,次日大概率买不进)
 TAIL = 500                # 回看窗口(MA240+EMA收敛余量)
 
@@ -69,9 +70,13 @@ def collect_candidates(parq_dir=None, expected_date=None, signal_fn=None, tail=T
             prev = g["close"].iloc[-2]
             cur = g["close"].iloc[-1]
             fs = feature_series(g)
+            amt = float(df["amount"].iloc[-1] * 1000)   # amount列已是真实成交额(千元,源已按复权校准),勿再除factor
+            if amt > MAX_PLAUSIBLE_AMOUNT:              # 守卫:防源数据单行异常静默通过流动性过滤
+                anomalies.append((sym, "成交额 %.0f亿 超合理上限(疑源数据异常,不入候选)" % (amt / 1e8)))
+                continue
             cands.append({"sym": sym, "date": g.index[-1], "close": float(cur),
                           "prev_close": float(prev), "chg": float(cur / prev - 1),
-                          "amount": float(df["amount"].iloc[-1] / df["factor"].iloc[-1] * 1000),
+                          "amount": amt,
                           "feats": {k: (float(s.iloc[-1]) if s.iloc[-1] == s.iloc[-1] else None)
                                     for k, s in fs.items()}})
         except Exception as e:                                  # 单票异常不炸整体
@@ -261,7 +266,7 @@ def snapshot(code, date=None):
             "close": float(df["close"].iloc[i]),
             "raw_close": float(df["close"].iloc[i] / df["factor"].iloc[i]),
             "chg": float(df["close"].iloc[i] / prev - 1),
-            "amount": float(df["amount"].iloc[i] / df["factor"].iloc[i] * 1000),
+            "amount": float(df["amount"].iloc[i] * 1000),   # 同 collect:amount列已是真实成交额(千元)
             "env": "牛性" if bull else "熊性", "feats": feats,
             "ma240": float(df["ma240"].iloc[i]) if "ma240" in df else None,
             "boll_mid": float(df["boll_mid"].iloc[i]) if "boll_mid" in df else None,

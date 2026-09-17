@@ -33,6 +33,40 @@ def test_collect_uses_injected_signal_and_tail(tmp_path, monkeypatch):
     assert c["amount"] > 0
 
 
+def test_collect_amount_is_raw_column_not_factor_adjusted(tmp_path):
+    """回归(Task7专项C):parquet 的 amount 列已是真实成交额(千元)——再除 factor 属双重校正,
+    微因子股(如 sh601869 factor≈0.028)会被放大 35 倍至千亿级。"""
+    parq = tmp_path / "ind"; parq.mkdir()
+    df = make_df(seed=1)
+    df["factor"] = 0.05                       # 微复权因子
+    df["amount"] = 6.0e5                      # 真实成交额 60万千元 = 6亿元
+    write_pq(parq / "sh600001.parquet", df)
+
+    def last_row_only(df_, cfg):
+        s = pd.Series(False, index=df_.index)
+        s.iloc[-1] = True
+        return s
+    cands, anomalies = S.collect_candidates(str(parq), expected_date=None, signal_fn=last_row_only)
+    assert not anomalies and len(cands) == 1
+    assert cands[0]["amount"] == pytest.approx(6.0e8)          # 6亿,而非 6亿/0.05=120亿
+
+
+def test_collect_absurd_amount_routes_to_anomaly(tmp_path):
+    """守卫:单股日成交额超合理上限(5e10,源数据单行毛刺)→记异常,不静默通过流动性过滤。"""
+    parq = tmp_path / "ind"; parq.mkdir()
+    df = make_df(seed=1)
+    df["amount"] = 6.0e8                      # 6亿千元 → 6000亿元,任何个股单日不可能
+    write_pq(parq / "sh600001.parquet", df)
+
+    def last_row_only(df_, cfg):
+        s = pd.Series(False, index=df_.index)
+        s.iloc[-1] = True
+        return s
+    cands, anomalies = S.collect_candidates(str(parq), expected_date=None, signal_fn=last_row_only)
+    assert cands == [] and len(anomalies) == 1
+    assert "sh600001" in anomalies[0][0] and "超合理上限" in anomalies[0][1]
+
+
 def test_screen_hard_filter_and_rank():
     tbl = {"bull|j<=10|dd>-15": {"n": 100, "win_rate": 0.6, "payoff": 2.0, "types": {}},
            "bear|10<j<=15|dd<=-15": {"n": 10, "win_rate": 0.9, "payoff": None, "types": {}}}
