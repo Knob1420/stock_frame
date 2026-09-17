@@ -43,15 +43,17 @@ def watching(pool):
 
 # —— 状态机
 def add_entry(pool, code, name, reason, reason_tags, snapshot, add_close,
-              added, cand_dates, cfg_ver):
-    """入池:仅限当日/前一交易日候选;watching 去重(spec §9)。"""
+              added, cand_dates, cfg_ver, add_close_raw=None):
+    """入池:仅限当日/前一交易日候选;watching 去重(spec §9)。
+    add_close 为后复权基准(信号/极值/结案口径);add_close_raw 为入池日现价(人读显示,可缺省)。"""
     for e in watching(pool):
         if e["code"] == code:
             raise ValueError("%s 已在 watching( %s 入池),拒绝重复" % (code, e["added"]))
     if added not in cand_dates:
         raise ValueError("%s 不在候选名单日期 %s 中(只认当日/昨日)" % (code, cand_dates))
     entry = {"code": code, "name": name, "added": added, "cfg_version": cfg_ver,
-             "add_close": add_close, "reason": reason, "reason_tags": reason_tags,
+             "add_close": add_close, "add_close_raw": add_close_raw,
+             "reason": reason, "reason_tags": reason_tags,
              "snapshot": snapshot, "status": "watching",
              "max_up": 0.0, "min_dn": 0.0, "days": 0,
              "max_up_day": None, "max_up_date": None,

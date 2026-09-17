@@ -19,6 +19,16 @@ def test_profile_card_renders():
     assert "58.0%" in card and "8.3" in card and "5.4" in card
 
 
+def test_profile_card_price_is_raw():
+    cand = {"sym": "sz000651", "close": 45.6, "chg": 0.012, "amount": 5.4e8, "raw_close": 38.2,
+            "bucket": "bull|j<=10|dd>-15",
+            "bucket_stat": {"n": 120, "win_rate": 0.58, "payoff": 1.9},
+            "feats": {"j_low": 8.3, "dd": -0.12, "age": 23, "shrink": 0.72}}
+    card = S.profile_card(cand, name="格力电器")
+    assert "38.20" in card                        # 收盘显示现价(raw_close)
+    assert "45.60" not in card                    # 后复权价不再进人读卡片
+
+
 def _mk_parq(root, last="2026-09-17"):
     parq = root / "ind"; parq.mkdir(exist_ok=True)
     sh = make_df(n=600)
@@ -106,3 +116,35 @@ def test_main_scan_tracking_closes_entry(tmp_path, monkeypatch):
     e2 = {x["code"]: x for x in st2["pool"]}["600000"]
     assert e2["days"] == 1 and e2["last_date"] == df.index[-5]  # outcome 冻结,不重复计
     assert e2["outcome"] == e["600000"]["outcome"]
+
+
+def test_pool_dynamic_displays_raw_prices(tmp_path, monkeypatch):
+    import kdj.layers as L
+    parq = _mk_parq(tmp_path)
+    monkeypatch.setattr(C, "LOOKUP_DIR", str(tmp_path / "lookup"))
+    monkeypatch.setattr(L, "signal", lambda df, cfg: pd.Series(False, index=df.index))
+
+    df = pd.read_parquet(parq / "sh600000.parquet")
+    added, last = df.index[-2], df.index[-1]
+    df.at[added, "factor"] = 1.25                 # 模拟入池后除权:factor 抬升→现价骤降
+    df.at[last, "factor"] = 2.5
+    write_pq(parq / "sh600000.parquet", df)
+    base_raw = float(df.at[added, "close"] / 1.25)
+    last_raw = float(df.at[last, "close"] / 2.5)
+
+    pool = {"version": 1, "pool": []}
+    P.add_entry(pool, "600000", "浦发银行", "t", [], {}, float(df.at[added, "close"]), added,
+                [added], "test", add_close_raw=base_raw)
+    pool_path = str(tmp_path / "pool.json")
+    P.save_pool(pool, pool_path)
+
+    assert S.main_scan(parq_dir=str(parq), pool_path=pool_path,
+                       report_dir=str(tmp_path / "reports"), now_date="2026-09-17") == 0
+    st = json.load(open(pool_path))
+    e = st["pool"][0]
+    assert e["status"] == "watching" and e["add_close_raw"] == base_raw   # 未触发,留存观察
+    md = (tmp_path / "reports" / "2026-09-17.md").read_text(encoding="utf-8")
+    assert "基准 %.2f" % base_raw in md                          # 基准=入池日现价
+    assert "基准 %.2f" % float(df.at[added, "close"]) not in md  # 后复权基准不进人读行
+    assert "现价 %.2f" % last_raw in md                          # last_close=当日现价
+    assert "期间除权" in md                                      # 显示价差与极值背离→注记

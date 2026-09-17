@@ -116,9 +116,9 @@ def profile_card(cand, name=""):
     wr = "%.1f%%" % (100 * b["win_rate"]) if b.get("win_rate") is not None else "—"
     po = "%.2f" % b["payoff"] if b.get("payoff") is not None else "—"
     f = cand["feats"]
-    return ("- **%s %s** 收盘 %.2f(%+.1f%%)/现价 %.2f | 环境 %s | J低 %.1f | 回撤 %.1f%% | "
+    return ("- **%s %s** 收盘 %.2f(%+.1f%%) | 环境 %s | J低 %.1f | 回撤 %.1f%% | "
             "趋势年龄 %s | 缩量比 %s | 桶 %s(胜率 %s 盈亏比 %s 样本 %s) | 成交额 %.1f亿"
-            % (cand["sym"], name, cand["close"], 100 * cand["chg"], cand.get("raw_close", 0.0),
+            % (cand["sym"], name, cand.get("raw_close", cand["close"]), 100 * cand["chg"],
                cand.get("env", "—"), f.get("j_low") if f.get("j_low") is not None else float("nan"),
                100 * f["dd"] if f.get("dd") is not None else float("nan"),
                f.get("age"), f.get("shrink"), cand.get("bucket", "—"), wr, po, b.get("n", 0),
@@ -135,6 +135,16 @@ def _tracking_bars(df, entry, today):
     i_today = cal.index(today) if today in cal else None
     n_elapsed = (i_today - i_add) if (i_add is not None and i_today is not None) else len(bars)
     return bars, max(n_elapsed, 0)
+
+
+def _div_note(entry, raw_last):
+    """除权背离注记:现价口径涨跌(现价/入池日现价−1)比后复权极值 min_dn 还低逾 3 个百分点
+    → 期间必有除权,人读提示比例仍按后复权(信号/极值/结案口径不变)。"""
+    base = entry.get("add_close_raw")
+    cur = raw_last.get(entry["code"])
+    if base is None or cur is None:
+        return ""
+    return "（期间除权，比例按后复权）" if cur / base - 1 - entry["min_dn"] < -0.03 else ""
 
 
 def main_scan(parq_dir=None, pool_path=None, report_dir=None, now_date=None):
@@ -176,6 +186,7 @@ def main_scan(parq_dir=None, pool_path=None, report_dir=None, now_date=None):
     # 池内跟踪与结案
     state = P.load_pool(pool_path)
     closed_today = []
+    raw_last = {}                       # 显示口径现价:code → last_close/当日 factor(存储仍后复权)
     for e in P.watching(state):
         fp = os.path.join(parq_dir, _sym_path(e["code"]))
         try:
@@ -187,6 +198,9 @@ def main_scan(parq_dir=None, pool_path=None, report_dir=None, now_date=None):
         o = P.track(e, bars, n_el)
         if o:
             closed_today.append((e, o))
+        d = e.get("last_date")
+        if d in df.index:
+            raw_last[e["code"]] = float(e["last_close"] / df.at[d, "factor"])
     P.save_pool(state, pool_path)
 
     # candidates JSON(入池校验的机器可读源)
@@ -209,9 +223,11 @@ def main_scan(parq_dir=None, pool_path=None, report_dir=None, now_date=None):
     lines += [profile_card(c) for c in top] or ["- 无"]
     lines += ["", "## 3. 池内动态"]
     w = P.watching(state)
-    lines += ["- %s 入池 %s 基准 %.2f | 极值 %+.1f%%/%+.1f%% | 已过 %d 日"
-              % (e["code"], e["added"], e["add_close"], 100 * e["max_up"], 100 * e["min_dn"],
-                 e.get("days", 0)) for e in w] or ["- 池空"]
+    lines += ["- %s 入池 %s 基准 %.2f | 现价 %s | 极值 %+.1f%%/%+.1f%% | 已过 %d 日%s"
+              % (e["code"], e["added"], e.get("add_close_raw") or e["add_close"],
+                 "%.2f" % raw_last[e["code"]] if e["code"] in raw_last else "—",
+                 100 * e["max_up"], 100 * e["min_dn"], e.get("days", 0),
+                 _div_note(e, raw_last)) for e in w] or ["- 池空"]
     lines += ["", "## 4. 今日结案"]
     lines += ["- %s → **%s**(历时 %d 日,极值 %+.1f%%/%+.1f%%)"
               % (e["code"], o["type"], o["days"], 100 * o["max_up"], 100 * o["min_dn"])

@@ -111,3 +111,12 @@ def test_new_entry_extreme_fields_init_null():
     e = P.add_entry(pool, "000651", "", "", [], {}, 10.0, D[0], [D[0]], cfg_version())
     for k in ("max_up_day", "max_up_date", "min_dn_day", "min_dn_date"):
         assert e[k] is None
+
+
+def test_add_entry_stores_add_close_raw():
+    pool = {"version": 1, "pool": []}
+    e = P.add_entry(pool, "000651", "", "", [], {}, 10.0, D[0], [D[0]], cfg_version(),
+                    add_close_raw=9.5)
+    assert e["add_close_raw"] == 9.5                    # 入池日现价落盘
+    e2 = P.add_entry(pool, "000001", "", "", [], {}, 10.0, D[0], [D[0]], cfg_version())
+    assert e2["add_close_raw"] is None                  # 缺省兼容旧调用
