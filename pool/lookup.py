@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
-"""lookup.py —— 同型桶:特征提取、全史回放、8桶统计表生成与查表(spec §6)。
-判定口径=池自己的结案规则(hit+8%/miss−5%/flat 10日,T+1起算),与回测 E1/E3 无关。"""
+"""lookup.py —— 同型桶:特征提取、全史回放、18桶统计表生成与查表(spec §6 + 6c 裁决)。
+判定口径=池自己的结案规则(hit+8%/miss−5%/flat 10日,T+1起算),与回测 E1/E3 无关。
+6c: J×回撤各 3 内档(共18桶,单日有效9);回放跳过收盘涨停代理(≥9.7%,与筛选口径对称);
+表文件名带桶方案版本 -b2,旧 8 桶表(无后缀)不再被加载。"""
 import glob
 import json
 import os
@@ -13,6 +15,8 @@ from pool.pool import CLOSE_CFG
 
 J_THR = 15.0          # 桶外边界=cfg L2 的 J 阈值(l2_low 默认 15,硬编码并注释)
 DD_FLOOR_KEY = "depth"
+BUCKET_VER = "b2"     # 桶方案版本(J 3档×dd 3档):方案再变更时递增,旧表不静默沿用
+LIM_UP = 0.097        # 收盘涨停代理(≥9.7%):次日追高不可操作,回放跳过(与筛选硬过滤口径对称)
 
 
 def feature_series(df):
@@ -38,19 +42,25 @@ def signal_features(df, i=-1):
 
 
 def bucket_key(env_bull, j_low, dd):
-    """8桶键;特征超界钳制到边缘桶(防换cfg后漏桶)。内部分档 10/-15% 为固定常数。"""
+    """18桶键(J 深度 3 档 × 回撤 3 档 × 牛熊;单日有效 9 桶)。边界值归更深档。
+    内部分档 5/10 与 -10%/-15% 为固定常数;外边界仍跟 cfg(J_THR=15、depth=-0.25),
+    特征超界钳制到边缘桶(防换cfg后漏桶)。元组 arity 恒 3,scan 拼桶名自动适配。"""
     from kdj.layers import DEFAULT_CFG
     je = min(j_low, J_THR)
     de = min(max(dd, DEFAULT_CFG[DD_FLOOR_KEY]), 0.0)
     return ("bull" if env_bull else "bear",
-            "j<=10" if je <= 10 else "10<j<=15",
-            "dd>-15" if de > -0.15 else "dd<=-15")
+            "j<=5" if je <= 5 else ("5<j<=10" if je <= 10 else "10<j<=15"),
+            "dd>-10" if de > -0.10 else ("-15<dd<=-10" if de > -0.15 else "dd<=-15"))
 
 
 def replay_outcome(df, i, cfg=CLOSE_CFG):
     """行 i 信号日的池口径结局。基准=信号日 close;窗口=i+1..i+10 行。数据不足→None。
-    触发判定与 pool._trigger 同口径:严格越过阈值(±1e-9 容差),恰在阈值上不触发。"""
+    触发判定与 pool._trigger 同口径:严格越过阈值(±1e-9 容差),恰在阈值上不触发。
+    信号日收盘涨幅 ≥9.7%(涨停代理,后复权 close/close[-1] 口径同筛选)→ None 跳过,
+    统计与筛选口径对称(6c);首行无昨收,不判涨停。"""
     eps = 1e-9
+    if i > 0 and df["close"].iloc[i] / df["close"].iloc[i - 1] - 1 >= LIM_UP:
+        return None                                  # 收盘涨停:次日追高不可操作,不入统计
     base = df["close"].iloc[i]
     hu = (df["high"].iloc[i + 1: i + 1 + cfg["window"]] / base - 1).reset_index(drop=True)
     ld = (df["low"].iloc[i + 1: i + 1 + cfg["window"]] / base - 1).reset_index(drop=True)
@@ -70,11 +80,11 @@ def replay_outcome(df, i, cfg=CLOSE_CFG):
 
 
 def lookup_path(ver, out_dir=None):
-    return os.path.join(out_dir or C.LOOKUP_DIR, "lookup-%s.json" % ver)
+    return os.path.join(out_dir or C.LOOKUP_DIR, "lookup-%s-%s.json" % (ver, BUCKET_VER))
 
 
 def build_lookup(parq_dir=None, out_dir=None, cfg_ver=None):
-    """逐股流式回放全史信号→8桶统计(离线、一次性慢)。env=sh000300 close vs ma240。"""
+    """逐股流式回放全史信号→18桶统计(离线、一次性慢)。env=sh000300 close vs ma240。"""
     import kdj.layers as L
     from kdj.layers import DEFAULT_CFG
     parq_dir = parq_dir or C.PARQ_DIR
