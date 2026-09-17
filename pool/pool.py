@@ -54,6 +54,8 @@ def add_entry(pool, code, name, reason, reason_tags, snapshot, add_close,
              "add_close": add_close, "reason": reason, "reason_tags": reason_tags,
              "snapshot": snapshot, "status": "watching",
              "max_up": 0.0, "min_dn": 0.0, "days": 0,
+             "max_up_day": None, "max_up_date": None,
+             "min_dn_day": None, "min_dn_date": None,
              "last_date": None, "last_close": None, "outcome": None, "trade": None}
     pool["pool"].append(entry)
     return entry
@@ -82,10 +84,15 @@ def track(entry, bars, n_elapsed, cfg=CLOSE_CFG):
     for d, hi, lo, c in bars:
         if d <= entry["added"] or (entry["last_date"] and d <= entry["last_date"]):
             continue                                         # 幂等:跳过已处理
-        entry["max_up"] = max(entry["max_up"], hi / base - 1)
-        entry["min_dn"] = min(entry["min_dn"], lo / base - 1)
+        entry["days"] += 1                                   # 先计本日序号,再盖戳
+        up, dn = hi / base - 1, lo / base - 1
+        if up > entry["max_up"]:                             # 严格超越才刷新+盖戳
+            entry["max_up"] = up
+            entry["max_up_day"], entry["max_up_date"] = entry["days"], d
+        if dn < entry["min_dn"]:
+            entry["min_dn"] = dn
+            entry["min_dn_day"], entry["min_dn_date"] = entry["days"], d
         entry["last_date"], entry["last_close"] = d, c
-        entry["days"] += 1
         t = _trigger(entry, cfg)
         if t:
             entry["outcome"] = {"type": t, "days": entry["days"],

@@ -14,6 +14,8 @@ def mk_entry(added=D[0]):
             "add_close": 10.0, "reason": "", "reason_tags": [],
             "snapshot": {"env": "牛性", "j_low": 8, "drawdown": -0.18, "age": 23},
             "status": "watching", "max_up": 0.0, "min_dn": 0.0, "days": 0,
+            "max_up_day": None, "max_up_date": None,
+            "min_dn_day": None, "min_dn_date": None,
             "last_date": None, "last_close": None, "outcome": None, "trade": None}
 
 
@@ -89,3 +91,23 @@ def test_annotate_trade():
     P.annotate_trade(e, buy_date=D[1], buy_price=39.2)
     P.annotate_trade(e, sell_date=D[5], sell_price=41.0)
     assert e["trade"] == {"buy_date": D[1], "buy_price": 39.2, "sell_date": D[5], "sell_price": 41.0}
+
+
+# ---------- 极值日期戳 ----------
+def test_extreme_day_stamps_follow_refresh():
+    e = mk_entry()
+    bars = [bar(D[1], 10.2, 9.9, 10.1),      # day1: max_up 2%
+            bar(D[2], 10.1, 9.7, 10.0),      # day2: min_dn 3%(不触发)
+            bar(D[3], 10.5, 9.95, 10.4)]     # day3: max_up 刷新 5%
+    P.track(e, bars, n_elapsed=3)
+    assert e["max_up_day"] == 3 and e["max_up_date"] == D[2 + 1]
+    assert e["min_dn_day"] == 2 and e["min_dn_date"] == D[1 + 1]
+    P.track(e, bars, n_elapsed=3)             # 重跑 → 戳不动
+    assert e["max_up_day"] == 3
+
+
+def test_new_entry_extreme_fields_init_null():
+    pool = {"version": 1, "pool": []}
+    e = P.add_entry(pool, "000651", "", "", [], {}, 10.0, D[0], [D[0]], cfg_version())
+    for k in ("max_up_day", "max_up_date", "min_dn_day", "min_dn_date"):
+        assert e[k] is None
