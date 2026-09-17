@@ -134,3 +134,11 @@ def test_load_lookup_ignores_legacy_no_suffix(tmp_path, monkeypatch):
         json.dumps({"cfg_version": "v9", "buckets": {"bull|j<=5|dd>-10": {"n": 1}}}),
         encoding="utf-8")
     assert K.load_lookup("v9")["buckets"]["bull|j<=5|dd>-10"]["n"] == 1
+
+
+def test_limit_up_constants_locked_to_screen():
+    # 6c 评审修复: 涨停口径对称裁决使 LIM_UP == MAX_CHG 成为载荷不变式(两常量分居
+    # lookup/scan,循环导入阻碍共享,cfg.py 不在本任务文件清单)——以测试锁定,改其一即红
+    from pool.scan import MAX_CHG
+    from pool.lookup import LIM_UP
+    assert LIM_UP == MAX_CHG
