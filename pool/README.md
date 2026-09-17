@@ -47,14 +47,16 @@ bash stockdata/daily_update.sh                                  # 0. 先更新�
 | `pool/reports/YYYY-MM-DD.md` | 日报六节；§6 AI 研究区由对话层追加 | 忽略 |
 | `pool/reports/candidates-YYYYMMDD.json` | 当日候选机器可读源，入池校验唯一依据 | 忽略 |
 | `pool/reports/review-YYYY-MM-DD.md` | 复盘报告（当前 cfg_version 已结案例） | 忽略 |
-| `pool/pool.json`（+`.bak`/`.tmp`） | 池状态 | 忽略 |
+| `pool/pool.json` | 池状态；作为案例库备份层**有意入库**（仅 `.bak`/`.tmp` 被忽略） | 入库 |
 | `pool/lookup_tables/lookup-<ver>-b2.json` | 18 桶统计 | 忽略 |
 
 ## 已知限制
 
 - **ST 5% 涨停未被 9.7% 代理捕获**：ST 票收 5% 涨停即已"不可操作"，但仍可能进候选与桶统计。
 - **sh000300 指数数据滞后一天**：环境标签慢一天（已知可接受，日报注明指数数据日）。
-- **J 内三档区分度弱**：首跑分析显示熊市浅回撤桶中 J 越深胜率反略低（设计文档待优化标记），
+- **J 内三档区分度弱**：首跑分析显示熊市浅回撤桶中 J 越深胜率反略低——依据两处可查：
+  设计文档 §15 待优化标记（仓库外 `/home/admin/stock/2026-09-16-observation-pool-mvp-design.md`）、
+  首跑附检（gitignored `pool/reports/2026-09-17.md` 的"附:分桶有效性初检"一节）。
   J 内档信息量有限，留作后续观察/再分档依据。
 - **本地无股票名源**：卡片只显示代码；AI 联网研究也以代码检索。
 - **outcome.days 对停牌票可能少计**（n_elapsed 按市场日历占位，信息性字段）。

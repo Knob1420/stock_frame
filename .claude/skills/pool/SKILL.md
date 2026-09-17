@@ -84,6 +84,9 @@ reason_tags 受控词表（只用这六个，不自造）：`缩量回调 / J首
    from pool import pool as P, cfg as C
 
    CODE, REASON, TAGS = "603118", "<用户确认后的理由>", ["缩量回调"]
+   assert "<" not in CODE + REASON + "".join(TAGS), "占位符未替换——照抄模板会写入垃圾条目"
+   assert len(CODE) == 6 and CODE.isdigit(), "CODE 需为 6 位数字代码"
+   assert set(TAGS) <= {"缩量回调", "J首拐", "板块联动", "大盘环境", "技术形态", "事件驱动"}, "TAGS 越出受控词表"
    snap = json.load(open("/tmp/snap-%s.json" % CODE, encoding="utf-8"))
    files = sorted(glob.glob("pool/reports/candidates-*.json"))[-2:][::-1]   # 新份在前
    cjs = [json.load(open(f, encoding="utf-8")) for f in files]
@@ -92,6 +95,7 @@ reason_tags 受控词表（只用这六个，不自造）：`缩量回调 / J首
    if hit is None:
        raise SystemExit("%s 不在当日/昨日候选，拒绝" % CODE)          # 正常应已在第1步拦截
    cj, cand = hit
+   assert snap["date"] == cj["date"], "snapshot 日期 %s ≠ 候选日 %s（--date 漏传会把今日 feats 混进候选日基准）" % (snap["date"], cj["date"])
    state = P.load_pool(C.POOL_PATH)
    e = P.add_entry(state, CODE, "", REASON, TAGS,
                    {"env": cand["env"],
