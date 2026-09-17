@@ -537,10 +537,10 @@ git commit -m "feat: pool状态机——入池校验/三判结案/幂等跟踪/�
 - Produces:
   - `feature_series(df) -> dict[str, pd.Series]`（键 `j_low/dd/age/shrink`；df 需列 `j/high/close/volume`）
   - `signal_features(df, i=-1) -> dict`（同上取第 i 行,float/None）
-  - `bucket_key(env_bull, j_low, dd) -> ("bull"|"bear", "j<=10"|"10<j<=15", "dd>-15"|"dd<=-15")`（超界钳制到边缘桶）
+  - `bucket_key(env_bull, j_low, dd) -> ("bull"|"bear", "j<=5"|"5<j<=10"|"10<j<=15", "dd>-10"|"-15<dd<=-10"|"dd<=-15")`（超界钳制到边缘桶；**6c 修订:8桶→18桶/3 档**）
   - `replay_outcome(df, i, cfg) -> dict|None`（池口径结局；窗口数据不足返回 None）
   - `build_lookup(parq_dir, out_dir, cfg_ver) -> dict`；`lookup_path(ver) -> str`；`load_lookup(ver) -> dict|None`
-  - lookup JSON：`{"cfg_version": v, "buckets": {"bull|j<=10|dd>-15": {"n", "win_rate", "payoff", "types"}}}`，win_rate=hit/全部结局（含 flat），payoff=hit组平均max_up÷|miss组平均min_dn|
+  - lookup JSON：`{"cfg_version": v, "buckets": {"bull|j<=5|dd>-10": {"n", "win_rate", "payoff", "types"}}}`，win_rate=hit/全部结局（含 flat），payoff=hit组平均max_up÷|miss组平均min_dn|
 
 - [ ] **Step 1: 写失败测试 pool/tests/test_lookup.py**
 
@@ -557,10 +557,12 @@ from pool.tests.conftest import make_df
 
 
 def test_bucket_key_and_clamp():
-    assert K.bucket_key(True, 8.0, -0.10) == ("bull", "j<=10", "dd>-15")
-    assert K.bucket_key(False, 13.0, -0.20) == ("bear", "10<j<=15", "dd<=-15")
-    assert K.bucket_key(True, -30.0, -0.60) == ("bull", "j<=10", "dd<=-15")   # 超界钳制到边缘桶
-    assert K.bucket_key(False, 40.0, 0.05) == ("bear", "10<j<=15", "dd>-15")  # 超上界同钳制
+    # 6c: J 三档(≤5 / 5~10 / 10~15) × dd 三档(>-10% / -10~-15% / -15~-25%),边界值归更深档
+    assert K.bucket_key(True, 5.0, -0.05) == ("bull", "j<=5", "dd>-10")        # J=5 落 j<=5
+    assert K.bucket_key(True, 10.0, -0.05) == ("bull", "5<j<=10", "dd>-10")    # J=10 落 5<j<=10
+    assert K.bucket_key(False, 8.0, -0.10) == ("bear", "5<j<=10", "-15<dd<=-10")   # dd=-10% 落中档
+    assert K.bucket_key(False, 8.0, -0.15) == ("bear", "5<j<=10", "dd<=-15")       # dd=-15% 落深档
+    assert K.bucket_key(True, -30.0, -0.60) == ("bull", "j<=5", "dd<=-15")     # 超界钳制到边缘桶
 
 
 def test_replay_outcome_paths():
@@ -628,9 +630,11 @@ Expected: FAIL（ModuleNotFoundError: pool.lookup）
 
 - [ ] **Step 3: 实现 pool/lookup.py**
 
+> ⚠ 8桶时代存档注:本块 bucket_key/测试断言已按 6c 修订同步为 18 桶/3 档(与 pool/lookup.py、pool/tests/test_lookup.py 现行一致);旧 8 桶口径已废。
+
 ```python
 # -*- coding: utf-8 -*-
-"""lookup.py —— 同型桶:特征提取、全史回放、8桶统计表生成与查表(spec §6)。
+"""lookup.py —— 同型桶:特征提取、全史回放、18桶统计表生成与查表(spec §6;6c 修订:8桶→18桶)。
 判定口径=池自己的结案规则(hit+8%/miss−5%/flat 10日,T+1起算),与回测 E1/E3 无关。"""
 import glob
 import json
@@ -670,13 +674,15 @@ def signal_features(df, i=-1):
 
 
 def bucket_key(env_bull, j_low, dd):
-    """8桶键;特征超界钳制到边缘桶(防换cfg后漏桶)。内部分档 10/-15% 为固定常数。"""
+    """18桶键(J 深度 3 档 × 回撤 3 档 × 牛熊;单日有效 9 桶)。边界值归更深档。
+    内部分档 5/10 与 -10%/-15% 为固定常数;外边界仍跟 cfg(J_THR=15、depth=-0.25),
+    特征超界钳制到边缘桶(防换cfg后漏桶)。元组 arity 恒 3,scan 拼桶名自动适配。"""
     from kdj.layers import DEFAULT_CFG
     je = min(j_low, J_THR)
     de = min(max(dd, DEFAULT_CFG[DD_FLOOR_KEY]), 0.0)
     return ("bull" if env_bull else "bear",
-            "j<=10" if je <= 10 else "10<j<=15",
-            "dd>-15" if de > -0.15 else "dd<=-15")
+            "j<=5" if je <= 5 else ("5<j<=10" if je <= 10 else "10<j<=15"),
+            "dd>-10" if de > -0.10 else ("-15<dd<=-10" if de > -0.15 else "dd<=-15"))
 
 
 def replay_outcome(df, i, cfg=CLOSE_CFG):
@@ -704,7 +710,7 @@ def lookup_path(ver, out_dir=None):
 
 
 def build_lookup(parq_dir=None, out_dir=None, cfg_ver=None):
-    """逐股流式回放全史信号→8桶统计(离线、一次性慢)。env=sh000300 close vs ma240。"""
+    """逐股流式回放全史信号→18桶统计(6c 修订;离线、一次性慢)。env=sh000300 close vs ma240。"""
     import kdj.layers as L
     from kdj.layers import DEFAULT_CFG
     parq_dir = parq_dir or C.PARQ_DIR
@@ -803,6 +809,8 @@ import pytest
 
 from pool import scan as S
 from pool.tests.conftest import make_df, write_pq
+
+# 注:下文 bucket 串为 8 桶时代字符串,仅作 screen() 的不透明测试键;6c 实际为 18 桶串
 
 
 def test_assemble_maps_j():
@@ -930,7 +938,7 @@ def collect_candidates(parq_dir=None, expected_date=None, signal_fn=None, tail=T
             cur = g["close"].iloc[-1]
             cands.append({"sym": sym, "date": g.index[-1], "close": float(cur),
                           "prev_close": float(prev), "chg": float(cur / prev - 1),
-                          "amount": float(df["amount"].iloc[-1] / df["factor"].iloc[-1] * 1000),
+                          "amount": float(df["amount"].iloc[-1] * 1000),   # Task 7 更正:amount列已是真实成交额(千元),勿再除factor
                           "feats": {k: (float(v) if v == v else None)
                                     for k, v in feature_series(g).items()}})
         except Exception as e:                                  # 单票异常不炸整体
@@ -993,6 +1001,8 @@ import pandas as pd
 
 from pool import scan as S
 from pool.tests.conftest import make_df, write_pq
+
+# 注:卡片 fixture 的 bucket 串为 8 桶时代字符串,仅作展示键;6c 实际为 18 桶串
 
 
 def test_profile_card_renders():
@@ -1204,7 +1214,7 @@ def snapshot(code, date=None):
             "close": float(df["close"].iloc[i]),
             "raw_close": float(df["close"].iloc[i] / df["factor"].iloc[i]),
             "chg": float(df["close"].iloc[i] / prev - 1),
-            "amount": float(df["amount"].iloc[i] / df["factor"].iloc[i] * 1000),
+            "amount": float(df["amount"].iloc[i] * 1000),   # Task 7 更正:amount列已是真实成交额(千元),勿再除factor
             "env": "牛性" if bull else "熊性", "feats": feats,
             "ma240": float(df["ma240"].iloc[i]) if "ma240" in df else None,
             "boll_mid": float(df["boll_mid"].iloc[i]) if "boll_mid" in df else None,

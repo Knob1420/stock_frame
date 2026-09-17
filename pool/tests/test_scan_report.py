@@ -148,3 +148,45 @@ def test_pool_dynamic_displays_raw_prices(tmp_path, monkeypatch):
     assert "基准 %.2f" % float(df.at[added, "close"]) not in md  # 后复权基准不进人读行
     assert "现价 %.2f" % last_raw in md                          # last_close=当日现价
     assert "期间除权" in md                                      # 显示价差与极值背离→注记
+
+
+def test_main_scan_preserves_ai_section_on_rerun(tmp_path, monkeypatch):
+    import kdj.layers as L
+    parq = _mk_parq(tmp_path)
+    monkeypatch.setattr(C, "LOOKUP_DIR", str(tmp_path / "lookup"))
+    kw = dict(parq_dir=str(parq), pool_path=str(tmp_path / "pool.json"),
+              report_dir=str(tmp_path / "reports"), now_date="2026-09-17")
+    monkeypatch.setattr(L, "signal", lambda df, cfg: pd.Series(False, index=df.index))
+    assert S.main_scan(**kw) == 0
+    rep = tmp_path / "reports" / "2026-09-17.md"
+    assert "信号 0 只" in rep.read_text(encoding="utf-8")
+    with open(rep, "a", encoding="utf-8") as f:                  # 模拟 AI 在 §6 追加研究卡
+        f.write("- MARKER-AI研究卡-勿删\n")
+
+    def last_only(df, cfg):
+        s = pd.Series(False, index=df.index)
+        s.iloc[-1] = True
+        return s
+    monkeypatch.setattr(L, "signal", last_only)                  # 换信号:§1-5 必须刷新
+    assert S.main_scan(**kw) == 0
+    md = rep.read_text(encoding="utf-8")
+    assert "MARKER-AI研究卡-勿删" in md                         # §6 在重跑后保留(reports/不入库)
+    assert "信号 2 只" in md and "信号 0 只" not in md           # §1-5 已刷新(0→2)
+    assert md.count("## 6.") == 1 and md.count("## 1.") == 1    # 不重复,顺序完整
+    assert md.index("## 1.") < md.index("## 6.")
+
+
+def test_stale_report_preserves_ai_section(tmp_path, monkeypatch):
+    import kdj.layers as L
+    parq = _mk_parq(tmp_path, last="2026-09-15")                 # 数据停在两天前
+    monkeypatch.setattr(L, "signal", lambda df, cfg: pd.Series(False, index=df.index))
+    rep = tmp_path / "reports" / "2026-09-17.md"
+    rep.parent.mkdir(parents=True)
+    rep.write_text("# 观察池日报 2026-09-17\n\n## 6. AI 研究区\n\n- MARKER-旧研究卡\n",
+                   encoding="utf-8")
+    rc = S.main_scan(parq_dir=str(parq), pool_path=str(tmp_path / "pool.json"),
+                     report_dir=str(rep.parent), now_date="2026-09-17")
+    assert rc == 1                                               # 滞后退出码不变
+    md = rep.read_text(encoding="utf-8")
+    assert "数据滞后" in md and "MARKER-旧研究卡" in md         # ⚠ 覆盖 §1-5 区,§6 保留
+    assert md.count("## 6.") == 1

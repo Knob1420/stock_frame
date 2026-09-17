@@ -160,7 +160,8 @@ cd /home/admin/stock_selection && .venv/bin/python - <<'EOF'
 from pool import pool as P, cfg as C
 CODE, PRICE = "603118", 16.80
 state = P.load_pool(C.POOL_PATH)
-e = next((e for e in state["pool"] if e["code"] == CODE), None)
+e = next((e for e in state["pool"] if e["code"] == CODE and e.get("status") == "watching"),
+         next((e for e in reversed(state["pool"]) if e["code"] == CODE), None))   # 优先 watching;无 watching 则取最新一条
 if e is None:
     raise SystemExit("%s 不在池中" % CODE)
 P.annotate_trade(e, buy_price=PRICE)          # 用户给了日期可再加 buy_date="YYYY-MM-DD"

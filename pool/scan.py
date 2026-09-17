@@ -152,6 +152,20 @@ def _div_note(entry, raw_last):
     return "（期间除权，比例按后复权）" if cur / base - 1 - entry["min_dn"] < -0.03 else ""
 
 
+def _merged_report_lines(path, fresh_lines):
+    """重跑日报:保留旧文件"## 6."(AI 研究区)起的全部内容——研究卡/推荐理由是持久资产
+    (reports/ 不入库,抹掉即不可恢复);§1-5 恒为新算。旧文件无 §6 → 按全新写。"""
+    if not os.path.isfile(path):
+        return fresh_lines
+    with open(path, encoding="utf-8") as f:
+        old = f.read().split("\n")
+    keep = next((k for k, l in enumerate(old) if l.startswith("## 6.")), None)
+    if keep is None:
+        return fresh_lines
+    cut = next((k for k, l in enumerate(fresh_lines) if l.startswith("## 6.")), len(fresh_lines))
+    return fresh_lines[:cut] + old[keep:]
+
+
 def main_scan(parq_dir=None, pool_path=None, report_dir=None, now_date=None):
     parq_dir = parq_dir or C.PARQ_DIR
     pool_path = pool_path or C.POOL_PATH
@@ -167,9 +181,13 @@ def main_scan(parq_dir=None, pool_path=None, report_dir=None, now_date=None):
                  or pd.read_parquet(p).index[-1] < expected)
              (os.path.join(parq_dir, "%s.parquet" % s))]
     if stale:
-        with open(os.path.join(report_dir, "%s.md" % expected), "w", encoding="utf-8") as f:
-            f.write("# 观察池日报 %s\n\n⚠ 数据滞后:哨兵 %s 未到 %s,请先跑 daily_update.sh\n"
-                    % (expected, ",".join(stale), expected))
+        rp = os.path.join(report_dir, "%s.md" % expected)
+        fresh = ["# 观察池日报 %s" % expected, "",
+                 "⚠ 数据滞后:哨兵 %s 未到 %s,请先跑 daily_update.sh" % (",".join(stale), expected),
+                 ""]
+        merged = _merged_report_lines(rp, fresh)     # 先合并再开写句柄,免得 "w" 截断旧 §6
+        with open(rp, "w", encoding="utf-8") as f:
+            f.write("\n".join(merged))
         print("数据滞后(%s)" % stale)
         return 1
 
@@ -240,8 +258,10 @@ def main_scan(parq_dir=None, pool_path=None, report_dir=None, now_date=None):
     lines += ["", "## 5. 异常票 / 数据说明"]
     lines += ["- %s: %s" % a for a in anomalies] or ["- 无"]
     lines += ["", "## 6. AI 研究区", "", ">(\"研究今天的候选\"后由 AI 追加研究卡与推荐理由)", ""]
-    with open(os.path.join(report_dir, "%s.md" % expected), "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+    rp = os.path.join(report_dir, "%s.md" % expected)
+    merged = _merged_report_lines(rp, lines)         # 先合并再开写句柄,免得 "w" 截断旧 §6
+    with open(rp, "w", encoding="utf-8") as f:
+        f.write("\n".join(merged))
     print("scan 完成:候选 %d(剔 %d) 结案 %d → %s"
           % (len(top), n_rej, len(closed_today), os.path.join(report_dir, expected + ".md")))
     return 0
