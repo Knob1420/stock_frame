@@ -3,6 +3,8 @@ import json
 
 import pandas as pd
 
+from pool import cfg as C
+from pool import pool as P
 from pool import scan as S
 from pool.tests.conftest import make_df, write_pq
 
@@ -41,6 +43,7 @@ def test_main_scan_e2e_fixture(tmp_path, monkeypatch):
         s.iloc[-1] = True                                       # 保证末日有信号
         return s
     monkeypatch.setattr(L, "signal", every_3rd_plus_last)
+    monkeypatch.setattr(C, "LOOKUP_DIR", str(tmp_path / "lookup"))   # 隔离:勿污染真实 lookup 目录
     pool_path = str(tmp_path / "pool.json")
     rc = S.main_scan(parq_dir=str(parq), pool_path=pool_path,
                      report_dir=str(tmp_path / "reports"), now_date=last)
@@ -50,7 +53,7 @@ def test_main_scan_e2e_fixture(tmp_path, monkeypatch):
     assert rep.is_file() and cj.is_file()
     data = json.load(open(cj))
     assert data["date"] == last and data["cfg_version"]
-    assert all(c["amount"] >= S.MIN_AMOUNT or True for c in data["candidates"])
+    assert all(c["amount"] >= S.MIN_AMOUNT for c in data["candidates"])   # top 已过硬过滤
     md = rep.read_text(encoding="utf-8")
     for sec in ("环境", "今日候选", "池内动态", "今日结案", "异常"):
         assert sec in md
@@ -63,3 +66,43 @@ def test_main_scan_stale_data_exit1(tmp_path, monkeypatch):
     rc = S.main_scan(parq_dir=str(parq), pool_path=str(tmp_path / "pool.json"),
                      report_dir=str(tmp_path / "reports"), now_date="2026-09-17")
     assert rc == 1                                              # 数据滞后 → 退出码1
+
+
+def test_main_scan_tracking_closes_entry(tmp_path, monkeypatch):
+    import kdj.layers as L
+    parq = _mk_parq(tmp_path)
+    monkeypatch.setattr(C, "LOOKUP_DIR", str(tmp_path / "lookup"))   # 隔离 lookup 目录
+    monkeypatch.setattr(L, "signal", lambda df, cfg: pd.Series(False, index=df.index))
+
+    df = pd.read_parquet(parq / "sh600000.parquet")
+    added = df.index[-6]                                        # 跟踪窗口=末 5 根K线
+    add_close = float(df.at[added, "close"])                    # added 日实际收盘作基准
+    d1 = df.index[-5]                                           # 首根跟踪K线:显式改写极值
+    df.at[d1, "high"] = add_close * 1.09                        # +9% → hit 触发
+    df.at[d1, "low"] = add_close * 0.96                         # −4% → min_dn 更新但不 miss
+    write_pq(parq / "sh600000.parquet", df)
+    pool = {"version": 1, "pool": []}
+    P.add_entry(pool, "600000", "浦发银行", "t", [], {}, add_close, added, [added], "test")
+    P.add_entry(pool, "000999", "缺数据", "t", [], {}, 10.0, added, [added], "test")
+    pool_path = str(tmp_path / "pool.json")
+    P.save_pool(pool, pool_path)
+
+    kw = dict(parq_dir=str(parq), pool_path=pool_path,
+              report_dir=str(tmp_path / "reports"), now_date="2026-09-17")
+    assert S.main_scan(**kw) == 0
+    st = json.load(open(pool_path))
+    e = {x["code"]: x for x in st["pool"]}
+    assert e["600000"]["outcome"]["type"] == "hit"              # 首根K线即触发 +8%
+    assert e["600000"]["days"] == 1 and e["600000"]["last_date"] == df.index[-5]
+    assert e["600000"]["max_up"] >= 0.08 and -0.05 < e["600000"]["min_dn"] < 0
+    assert e["600000"]["max_up_day"] == 1 and e["600000"]["max_up_date"] == df.index[-5]
+    assert e["600000"]["min_dn_day"] == 1 and e["600000"]["min_dn_date"] == df.index[-5]
+    assert e["000999"]["status"] == "watching"                  # parquet 缺失 → 记异常不结案
+    md = (tmp_path / "reports" / "2026-09-17.md").read_text(encoding="utf-8")
+    assert "600000 → **hit**" in md and "parquet 缺失" in md
+
+    assert S.main_scan(**kw) == 0                               # 二次运行幂等
+    st2 = json.load(open(pool_path))
+    e2 = {x["code"]: x for x in st2["pool"]}["600000"]
+    assert e2["days"] == 1 and e2["last_date"] == df.index[-5]  # outcome 冻结,不重复计
+    assert e2["outcome"] == e["600000"]["outcome"]
