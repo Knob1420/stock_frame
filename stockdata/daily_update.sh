@@ -38,6 +38,14 @@ else
     exit 2
 fi
 
+# Step 2.5: 观察池每日扫描(失败不影响主链——池是附加层)
+echo "[Step 2.5] 观察池扫描..."
+if "$VENV_PY" "/home/admin/stock_selection/pool/scan.py"; then
+    echo "[✓] 观察池扫描完成"
+else
+    echo "⚠ 观察池扫描失败(不影响数据与指标)——可单独重跑 pool/scan.py"
+fi
+
 # Step 3: 日志轮转(保留 30 天)
 find "$LOG_DIR" -name "*.log" -mtime +30 -delete
 
