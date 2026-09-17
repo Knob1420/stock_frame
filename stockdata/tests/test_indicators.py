@@ -58,8 +58,21 @@ def test_registry_matches_funccs_output():
     g = pd.DataFrame({
         "$open": np.linspace(1, 2, n), "$high": np.linspace(2, 3, n),
         "$low": np.linspace(0.5, 1.5, n), "$close": np.linspace(1, 2, n),
-        "$volume": np.linspace(100, 200, n)}, index=idx)
+        "$volume": np.linspace(100, 200, n), "$factor": np.linspace(1, 1, n),
+        "$amount": np.linspace(1e8, 2e8, n)}, index=idx)
     for name in INDICATORS:
         assert name in bi.FUNCS, "FUNCS 缺实现: %s" % name
         out = bi.FUNCS[name](g)
         assert list(out.columns) == INDICATORS[name]["columns"], name
+
+
+def test_raw_passthrough():
+    """raw 直通列:剥 $ 后原样输出,供池/预警做单一数据源(路线B)。"""
+    n = 5
+    g = pd.DataFrame({"$open": [1.0] * n, "$high": [2.0] * n, "$low": [0.5] * n,
+                      "$close": [1.5] * n, "$volume": [100.0] * n,
+                      "$factor": [1.0] * n, "$amount": [150.0] * n})
+    out = bi.FUNCS["raw"](g)
+    assert list(out.columns) == ["open", "high", "low", "close", "volume", "factor", "amount"]
+    assert out["close"].tolist() == [1.5] * n
+    assert out["factor"].tolist() == [1.0] * n

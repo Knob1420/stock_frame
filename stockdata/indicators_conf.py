@@ -19,4 +19,8 @@ INDICATORS = {
              "columns": ["boll_upper", "boll_mid", "boll_lower"]},
     "atr":  {"params": {"n": 14},
              "columns": ["atr14"]},
+    # 原始价量直通列(池/预警的单一数据源,路线B):open/high/low/close/volume 后复权,
+    # factor 复权因子(现价=close/factor),amount 真实成交额(元)
+    "raw":  {"params": {},
+             "columns": ["open", "high", "low", "close", "volume", "factor", "amount"]},
 }

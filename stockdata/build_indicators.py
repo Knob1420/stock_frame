@@ -81,6 +81,8 @@ FUNCS = {
     "vma":  lambda g: vma(g["$volume"], **INDICATORS["vma"]["params"]),
     "boll": lambda g: boll(g["$close"], **INDICATORS["boll"]["params"]),
     "atr":  lambda g: atr(g["$high"], g["$low"], g["$close"], **INDICATORS["atr"]["params"]),
+    "raw":  lambda g: g[["$open", "$high", "$low", "$close", "$volume", "$factor", "$amount"]]
+                   .rename(columns=lambda c: c.lstrip("$")),
 }
 
 
@@ -98,7 +100,8 @@ def run(codes=None, outdir=None, raw_symbols=False):
     else:                                        # 全市场:读 instruments/all.txt 首列
         syms = [ln.split("\t")[0].lower()
                 for ln in open(os.path.join(QLIB_URI, "instruments", "all.txt"), encoding="utf-8").read().splitlines() if ln.strip()]
-    df = D.features(syms, ["$close", "$high", "$low", "$volume"], disk_cache=0)
+    df = D.features(syms, ["$open", "$high", "$low", "$close", "$volume", "$factor", "$amount"],
+                    disk_cache=0)
     ok = skip = 0
     for sym, g in df.groupby(level=0):
         try:
