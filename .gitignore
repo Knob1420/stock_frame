@@ -7,3 +7,5 @@ pool/pool.json.bak
 pool/pool.json.tmp
 pool/reports/
 pool/lookup_tables/
+research/dataset-*.parquet
+research/build.log
