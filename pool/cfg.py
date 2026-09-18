@@ -11,7 +11,7 @@ if ROOT not in sys.path:
 
 from kdj.layers import DEFAULT_CFG                     # noqa: E402(需先修 sys.path)
 
-PARQ_DIR = os.path.join(ROOT, "stockdata", "indicators")
+PARQ_DIR = "/home/admin/stockdata/indicators"   # 数据与代码分离:数据在仓库外(2026-09-18)
 CALENDAR = "/home/admin/stockdata/qlib_bin/calendars/day.txt"
 REPORT_DIR = os.path.join(ROOT, "pool", "reports")
 POOL_PATH = os.path.join(ROOT, "pool", "pool.json")

@@ -9,7 +9,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_PY="/home/admin/stock_selection/.venv/bin/python3"
-LOG_DIR="$SCRIPT_DIR/logs"
+LOG_DIR="/home/admin/stockdata/logs"   # 数据与代码分离:日志落仓库外(2026-09-18)
 LOG_FILE="$LOG_DIR/daily_$(date '+%Y%m%d_%H%M%S').log"
 
 mkdir -p "$LOG_DIR"

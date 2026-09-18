@@ -28,10 +28,10 @@ bash /home/admin/stock_selection/stockdata/daily_update.sh
 # 1. 数据日历末（应为最近一个交易日）
 tail -1 /home/admin/stockdata/qlib_bin/calendars/day.txt
 # 2. 指标文件数（应 ≈6100+）与最新落盘时间（应为今天）
-ls /home/admin/stock_selection/stockdata/indicators | wc -l
-ls -lt /home/admin/stock_selection/stockdata/indicators | head -3
+ls /home/admin/stockdata/indicators | wc -l
+ls -lt /home/admin/stockdata/indicators | head -3
 # 3. 今日运行日志
-ls -t /home/admin/stock_selection/stockdata/logs/daily_*.log | head -1
+ls -t /home/admin/stockdata/logs/daily_*.log | head -1
 ```
 
 ## 内部流程（排障时才需要读）
@@ -53,10 +53,10 @@ ls -t /home/admin/stock_selection/stockdata/logs/daily_*.log | head -1
 |------|------|------|
 | `/home/admin/stockdata/qlib_bin/` | 全 A 股日频行情（qlib 二进制，~848M） | 保留，原地换新 |
 | `/home/admin/stockdata/{qlib_bin.tar.gz,staging/,qlib_bin.old/}` | 下载包/中转/旧数据 | 每次运行结束自动删除；若运行中断残留，可直接 `rm -rf` |
-| `stockdata/indicators/*.parquet` | 每股指标 19 列（~6100 文件，~2.2G） | 保留，每日覆盖重算 |
-| `stockdata/logs/` | 运行日志（`日期.log` + `daily_*.log`） | 保留 30 天自动轮转 |
+| `/home/admin/stockdata/indicators/*.parquet` | 每股指标 26 列（~6100 文件，~3.4G） | 保留，每日覆盖重算 |
+| `/home/admin/stockdata/logs/` | 运行日志（`日期.log` + `daily_*.log`） | 保留 30 天自动轮转 |
 
-## 指标清单（每股 parquet，index=日期，全历史，通达信口径，共 19 列）
+## 指标清单（每股 parquet，index=日期，全历史，通达信口径，共 26 列）
 
 | 列 | 说明 |
 |----|------|
@@ -67,6 +67,7 @@ ls -t /home/admin/stock_selection/stockdata/logs/daily_*.log | head -1
 | `vma5` / `vma20` | 量能均线（缩量/放量判断） |
 | `boll_upper` / `boll_mid` / `boll_lower` | BOLL 20 日 ±2×样本标准差(ddof=1) |
 | `atr14` | ATR=MA(TR,14) 国内口径（非 Wilder） |
+| `open`/`high`/`low`/`close`/`volume`/`factor`/`amount` | 原始价量直通（后复权；现价=close/factor；amount 千元=真实成交额）——池/研究单一数据源（路线 B） |
 
 加新指标：`indicators_conf.py` 注册表加一项 + `build_indicators.py` 写纯函数并登记 `FUNCS`。
 

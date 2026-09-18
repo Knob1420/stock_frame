@@ -64,6 +64,6 @@ bash stockdata/daily_update.sh                                  # 0. 先更新�
 
 ## 设计红线
 
-- 池模块禁 qlib（唯一数据源 = `stockdata/indicators` parquet，路线 B）。
+- 池模块禁 qlib（唯一数据源 = `/home/admin/stockdata/indicators` parquet，仓库外数据目录，路线 B）。
 - AI 产出（研究卡/理由草稿）只进 markdown；入池校验只认 candidates JSON；
   一切数字来自管道（snapshot/candidates JSON），对话层不自算指标。

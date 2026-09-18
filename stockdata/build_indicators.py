@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """build_indicators.py —— 全市场指标计算 + parquet 落盘。
 纯函数(macd/rsi/kdj,可单测) + run()(qlib 批量取数、按 indicators_conf 驱动、落 indicators 目录)。
-每天由 update_data.py 全量重算;也可单独跑:
-  E:/Anaconda/envs/stock/python.exe build_indicators.py                 # 全市场
+每天由 update_data.py 全量重算;也可单独跑(经分批脚本,勿单进程全市场——OOM):
+  /home/admin/stock_selection/.venv/bin/python build_indicators.py     # 全市场
   ... build_indicators.py --codes 000651,600941 --outdir tests/out     # 小样验证
 """
 import argparse
@@ -15,7 +15,7 @@ import pandas as pd
 from indicators_conf import INDICATORS
 
 QLIB_URI = "/home/admin/stockdata/qlib_bin"
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "indicators")
+OUT_DIR = "/home/admin/stockdata/indicators"   # 数据与代码分离:parquet 落仓库外(2026-09-18)
 
 
 # ---------- 纯函数(单测见 tests/test_indicators.py) ----------

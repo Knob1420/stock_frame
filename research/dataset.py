@@ -29,6 +29,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from kdj.layers import DEFAULT_CFG, signal                     # noqa: E402
+from pool.cfg import PARQ_DIR as _PARQ_DIR                     # noqa: E402
 from pool.cfg import cfg_version as _cfg_version               # noqa: E402
 from pool.lookup import bucket_key, feature_series, replay_outcome   # noqa: E402
 from pool.scan import assemble, iter_whitelist                 # noqa: E402
@@ -95,7 +96,7 @@ def _calendar_positions(dates, cal):
 
 
 def build_dataset(parq_dir=None, out_dir=None, cfg_ver=None, verbose=True):
-    parq_dir = parq_dir or os.path.join(ROOT, "stockdata", "indicators")
+    parq_dir = parq_dir or _PARQ_DIR
     out_dir = out_dir or os.path.join(ROOT, "research")
     cfg_ver = cfg_ver or _cfg_version()
     os.makedirs(out_dir, exist_ok=True)

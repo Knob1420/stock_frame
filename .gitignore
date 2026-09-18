@@ -1,8 +1,6 @@
 .venv/
 __pycache__/
 .pytest_cache/
-stockdata/indicators/
-stockdata/logs/
 pool/pool.json.bak
 pool/pool.json.tmp
 pool/reports/
