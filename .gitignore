@@ -2,8 +2,15 @@
 __pycache__/
 .pytest_cache/
 stockdata/indicators/
+stockdata/qlib_bin*
+stockdata/staging/
 stockdata/logs/
 pool/pool.json.bak
 pool/pool.json.tmp
 pool/reports/
 pool/lookup_tables/
+.env
+research/out/
+.claude/logs/
+watch/state.json
+watch/archive.parquet
