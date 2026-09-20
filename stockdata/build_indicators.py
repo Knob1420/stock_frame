@@ -14,7 +14,7 @@ import pandas as pd
 
 from indicators_conf import INDICATORS
 
-QLIB_URI = "/home/admin/stockdata/qlib_bin"
+QLIB_URI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "qlib_bin")
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "indicators")
 
 

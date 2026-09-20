@@ -10,7 +10,7 @@ description: A 股每日数据更新与全市场技术指标计算（qlib 数据
 ## 执行
 
 ```bash
-bash /home/admin/stock_selection/stockdata/daily_update.sh
+bash /home/zjlab/Documents/build_LLMs/NLP_course_hf/Stock/stock_frame/stockdata/daily_update.sh
 ```
 
 预期耗时：有新数据约 7-10 分钟（下载 539MB ~25s + 解压校验 + 31 批指标计算 ~6 分钟）；无新数据约 30 秒。
@@ -26,12 +26,12 @@ bash /home/admin/stock_selection/stockdata/daily_update.sh
 
 ```bash
 # 1. 数据日历末（应为最近一个交易日）
-tail -1 /home/admin/stockdata/qlib_bin/calendars/day.txt
+tail -1 /home/zjlab/Documents/build_LLMs/NLP_course_hf/Stock/stock_frame/stockdata/qlib_bin/calendars/day.txt
 # 2. 指标文件数（应 ≈6100+）与最新落盘时间（应为今天）
-ls /home/admin/stock_selection/stockdata/indicators | wc -l
-ls -lt /home/admin/stock_selection/stockdata/indicators | head -3
+ls /home/zjlab/Documents/build_LLMs/NLP_course_hf/Stock/stock_frame/stockdata/indicators | wc -l
+ls -lt /home/zjlab/Documents/build_LLMs/NLP_course_hf/Stock/stock_frame/stockdata/indicators | head -3
 # 3. 今日运行日志
-ls -t /home/admin/stock_selection/stockdata/logs/daily_*.log | head -1
+ls -t /home/zjlab/Documents/build_LLMs/NLP_course_hf/Stock/stock_frame/stockdata/logs/daily_*.log | head -1
 ```
 
 ## 内部流程（排障时才需要读）
@@ -51,8 +51,8 @@ ls -t /home/admin/stock_selection/stockdata/logs/daily_*.log | head -1
 
 | 路径 | 内容 | 策略 |
 |------|------|------|
-| `/home/admin/stockdata/qlib_bin/` | 全 A 股日频行情（qlib 二进制，~848M） | 保留，原地换新 |
-| `/home/admin/stockdata/{qlib_bin.tar.gz,staging/,qlib_bin.old/}` | 下载包/中转/旧数据 | 每次运行结束自动删除；若运行中断残留，可直接 `rm -rf` |
+| `/home/zjlab/Documents/build_LLMs/NLP_course_hf/Stock/stock_frame/stockdata/qlib_bin/` | 全 A 股日频行情（qlib 二进制，~848M） | 保留，原地换新 |
+| `/home/zjlab/Documents/build_LLMs/NLP_course_hf/Stock/stock_frame/stockdata/{qlib_bin.tar.gz,staging/,qlib_bin.old/}` | 下载包/中转/旧数据 | 每次运行结束自动删除；若运行中断残留，可直接 `rm -rf` |
 | `stockdata/indicators/*.parquet` | 每股指标 19 列（~6100 文件，~2.2G） | 保留，每日覆盖重算 |
 | `stockdata/logs/` | 运行日志（`日期.log` + `daily_*.log`） | 保留 30 天自动轮转 |
 

@@ -20,7 +20,7 @@ import urllib.request
 from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DOWNLOAD_DIR = "/home/admin/stockdata"
+DOWNLOAD_DIR = HERE
 QLIB_BIN = os.path.join(DOWNLOAD_DIR, "qlib_bin")
 SAMPLES = [("sh600000", "sh"), ("sz000651", "sz"), ("bj430017", "bj")]
 RELEASE_URL = "https://gh-proxy.com/https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz"

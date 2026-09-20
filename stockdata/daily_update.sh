@@ -8,7 +8,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_PY="/home/admin/stock_selection/.venv/bin/python3"
+VENV_PY="/home/zjlab/anaconda3/envs/qlib/bin/python3"
 LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/daily_$(date '+%Y%m%d_%H%M%S').log"
 
@@ -42,3 +42,6 @@ fi
 find "$LOG_DIR" -name "*.log" -mtime +30 -delete
 
 echo "=== 每日数据更新完成 $(date) ==="
+
+# 盘后监控:数据刷新完成后扫描自选股(watch/ 目录),有触发则推送(需 WATCH_WEBHOOK)
+(cd "$(dirname "$0")/../watch" && "$VENV_PY" scan.py --llm --push)

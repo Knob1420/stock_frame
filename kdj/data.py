@@ -5,7 +5,7 @@ import os
 import sys
 import pandas as pd
 
-STOCKDATA = "E:/quant/stockdata"
+STOCKDATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "stockdata")
 QLIB_URI = os.path.join(STOCKDATA, "qlib_bin")
 FIELDS = ("$open", "$high", "$low", "$close", "$volume")
 _inited = False
