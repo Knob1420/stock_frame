@@ -8,6 +8,7 @@
 import argparse
 import json
 import os
+import statistics
 import sys
 import urllib.parse
 import urllib.request
@@ -35,6 +36,13 @@ STATE_F = os.path.join(HERE, "state.json")
 ARCHIVE_F = os.path.join(HERE, "archive.parquet")
 
 
+def _r(x, nd=2):
+    """NaN/缺列安全取整;次新股指标不足期时字段为 None,LLM 侧显示 N/A。"""
+    if x is None or pd.isna(x):
+        return None
+    return round(float(x), nd)
+
+
 def snapshot(df, params_ma=(60, 120, 240)) -> dict:
     """触发时刻特征快照(研究管线的标注字段,LLM 快报的结构化输入)。"""
     c = df["close"].iloc[-1]
@@ -50,7 +58,76 @@ def snapshot(df, params_ma=(60, 120, 240)) -> dict:
     s["dd_52w"] = round(float(c / hi250.max() - 1), 4)
     s["pos_52w"] = round(float((c - lo250.min()) / (hi250.max() - lo250.min())), 3)
     s["volr"] = round(float(df["volume"].iloc[-1] / df["vma20"].iloc[-1]), 3)
+    # —— LLM 增强字段:均线/轨道绝对值(现价口径,免反推)+ 指标 + 近10日量价序列 ——
+    for n in (20, 60, 120, 240):
+        s["mav%d" % n] = _r(df["ma%d" % n].iloc[-1] / f)
+    s["kdj"] = [_r(df[x].iloc[-1], 1) for x in ("kdj_k", "kdj_d", "kdj_j")]
+    s["macd"] = [_r(df[x].iloc[-1] / f, 3) for x in ("macd_dif", "macd_dea", "macd_hist")]
+    s["rsi14"] = _r(df["rsi_14"].iloc[-1], 1)
+    s["boll"] = [_r(df[x].iloc[-1] / f) for x in ("boll_upper", "boll_mid", "boll_lower")]
+    s["atr_pct"] = _r(df["atr14"].iloc[-1] / c * 100, 1)
+    s["c10"] = [_r(x / f) for x in df["close"].iloc[-10:]]
+    s["vr10"] = [_r(v / vm) if pd.notna(vm) and vm > 0 else None
+                 for v, vm in zip(df["volume"].iloc[-10:], df["vma20"].iloc[-10:])]
     return s
+
+
+def market_context(ind_dir=IND, bench="sh000300"):
+    """全市场宽度统计 + 基准指数状态 → 大盘环境一行文本(LLM prompt 每轮共用一份)。
+
+    自建指标库全量扫描(约6100只,列裁剪读取约60s):涨跌家数、站上年线比例、
+    中位量比 + 沪深300 近期涨跌/距年线。数据日以基准指数日历末为准,末行不同日
+    的(北交所/退市残留,bj 段数据源不更新)不计入。任何一步失败都降级而非中断。
+    """
+    try:                                                       # 基准指数先行:定数据日
+        b = pd.read_parquet(os.path.join(ind_dir, "%s.parquet" % bench),
+                            columns=["close", "ma240"])
+        d = str(b.index[-1])[:10]
+    except Exception:
+        b, d = None, None
+    adv = dec = flat = above = total = 0
+    vrs = []
+    for fn in sorted(os.listdir(ind_dir)):
+        if not fn.endswith(".parquet") or fn[:-8].startswith(("sh000", "sz39")):
+            continue                                           # 指数/板块系列不计入个股统计
+        try:
+            df = pd.read_parquet(os.path.join(ind_dir, fn),
+                                 columns=["close", "ma240", "volume", "vma20"])
+        except Exception:
+            continue
+        if len(df) < 2 or (d and str(df.index[-1])[:10] != d):
+            continue
+        last, prev = df["close"].iloc[-1], df["close"].iloc[-2]
+        if last > prev:
+            adv += 1
+        elif last < prev:
+            dec += 1
+        else:
+            flat += 1
+        m = df["ma240"].iloc[-1]
+        if pd.notna(m):
+            total += 1
+            if last > m:
+                above += 1
+        vm = df["vma20"].iloc[-1]
+        if pd.notna(vm) and vm > 0:
+            vrs.append(float(df["volume"].iloc[-1] / vm))
+    parts = []
+    if total:
+        parts.append("涨%d/跌%d/平%d" % (adv, dec, flat))
+        parts.append("站上年线(MA240) %d/%d 只(%.0f%%)" % (above, total, 100.0 * above / total))
+    if vrs:
+        parts.append("中位量比%.2f" % statistics.median(vrs))
+    if b is not None:
+        c = b["close"].iloc[-1]
+        txt = "沪深300 近5日%+.1f%% 近20日%+.1f%%" % (
+            100 * (c / b["close"].iloc[-6] - 1), 100 * (c / b["close"].iloc[-21] - 1))
+        if pd.notna(b["ma240"].iloc[-1]):
+            txt += " 距年线%+.1f%%" % (100 * (c / b["ma240"].iloc[-1] - 1))
+        parts.append(txt)
+    if not parts:
+        return "大盘环境:统计不可用"
+    return "大盘环境(数据日%s,全市场%d只): %s" % (d or "?", adv + dec + flat, "; ".join(parts))
 
 
 def run(push=False):
@@ -144,13 +221,42 @@ def format_report(events, tracking=None, briefs=None) -> str:
     return "\n".join(lines)
 
 
-def _brief_once(facts):
-    """单次 GLM 调用:一只票的事实文本 → 六段快报文本。"""
+def _f(v):
+    """数值格式化;None(次新/数据不足)显示 N/A。"""
+    return "N/A" if v is None else "%g" % v
+
+
+def _stock_facts(e, rules_str):
+    """单票 → 多行结构化事实块(现价口径绝对值,LLM 直接引用免反推)。"""
+    ma = " ".join("MA%d=%s(%+.1f%%)" % (n, _f(e.get("mav%d" % n)),
+                                        100 * (e["close"] / e["mav%d" % n] - 1))
+                  for n in (20, 60, 120, 240) if e.get("mav%d" % n))
+    k, d, j = e.get("kdj") or (None, None, None)
+    dif, dea, hist = e.get("macd") or (None, None, None)
+    up, mid, low = e.get("boll") or (None, None, None)
+    c10 = "[%s]" % ",".join(_f(x) for x in e.get("c10") or [])
+    vr10 = "[%s]" % ",".join(_f(x) for x in e.get("vr10") or [])
+    return ("- %s %s 触发[%s]\n"
+            "  现价%.2f | %s | 距52周高 %+.1f%% 52周位置%.0f%% | 量比%.2f | 近20日区间[%.2f,%.2f]\n"
+            "  指标: KDJ K=%s D=%s J=%s | RSI14=%s | MACD DIF=%s DEA=%s 柱=%s | BOLL 上%s/中%s/下%s | ATR=%s%%现价\n"
+            "  近10日收盘%s 量比%s\n"
+            "  thesis:%s") % (
+        e["code"], e["name"], rules_str, e["close"], ma,
+        100 * e["dd_52w"], 100 * e["pos_52w"], e["volr"], e["lo20"], e["hi20"],
+        _f(k), _f(d), _f(j), _f(e.get("rsi14")), _f(dif), _f(dea), _f(hist),
+        _f(up), _f(mid), _f(low), _f(e.get("atr_pct")), c10, vr10, e["thesis"])
+
+
+def _brief_once(facts, market):
+    """单次 GLM 调用:大盘环境 + 一只票的事实文本 → 六段快报文本。"""
     import json as _j
     key = os.environ.get("GLM_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
-    prompt = ("你是盯盘助手。以下为该股今日触发的结构化事实(唯一信息来源,禁止编造数字)。"
-              "输出六段:①支撑位列表(来源:均线/近20日低点/箱体配置) ②压力位列表(来源同上) "
-              "③量价状态 ④当前位置评估 ⑤与thesis对照(当前是否符合低吸/关注的前置状态) ⑥风险提示。每段一行,简洁。\n\n" + facts)
+    prompt = ("你是盯盘助手。以下是当日大盘环境与该股今日触发的结构化事实(唯一信息来源,禁止编造数字;"
+              "MA/BOLL/MACD 均为现价口径绝对值,直接引用无需反推,N/A 表示数据不足)。\n"
+              + market + "\n\n" + facts +
+              "\n\n输出六段:①支撑位列表(来源:MA数值/BOLL下轨/近20日低点) ②压力位列表(来源:MA数值/BOLL上轨/近20日高点) "
+              "③量价状态(结合KDJ/RSI/MACD与近10日量价序列) ④当前位置评估(必须结合大盘环境判断顺逆势) "
+              "⑤与thesis对照(当前是否符合低吸/关注的前置状态) ⑥风险提示(大盘环境走弱时须点明)。每段一行,简洁。")
     body = _j.dumps({"model": os.environ.get("LLM_MODEL", "glm-5.3"),
                      "max_tokens": 2000,
                      "thinking": {"type": "disabled"},   # 快报是数字翻译非推理,关思考 7 倍提速
@@ -175,13 +281,10 @@ def llm_brief(events):
     first = {}                                         # code -> 该票首条事件(快照字段相同)
     for e in events:
         first.setdefault(e["code"], e)
+    market = market_context()                          # 全市场统计一轮一份,各票共用
     for code, e in first.items():
-        facts = "- %s %s 触发[%s] 现价%.2f 距MA60 %+.1f%% MA120 %+.1f%% MA240 %+.1f%% 距52周高 %.1f%% 52周位置%.0f%% 量比%.2f 近20日区间[%.2f,%.2f] thesis:%s" % (
-            e["code"], e["name"], merged[code], e["close"],
-            100 * e["dist_ma60"], 100 * e["dist_ma120"], 100 * e["dist_ma240"],
-            100 * e["dd_52w"], 100 * e["pos_52w"], e["volr"], e["lo20"], e["hi20"], e["thesis"])
         try:
-            outs[code] = _brief_once(facts)
+            outs[code] = _brief_once(_stock_facts(e, merged[code]), market)
         except Exception as ex:
             outs[code] = "(该票分析失败: %s)" % ex
     return outs
