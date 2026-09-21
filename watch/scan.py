@@ -216,14 +216,19 @@ if __name__ == "__main__":
                 hook = os.environ.get("WATCH_WEBHOOK", "")
                 sckey = os.environ.get("SERVERCHAN_KEY", "")
                 if hook:
-                    n = 0
-                    for i in range(0, len(full), 3800):   # 企微 markdown 上限 4096 字节,分条推全
-                        data = json.dumps({"msgtype": "markdown",
-                                           "markdown": {"content": full[i:i + 3800]}}).encode()
+                    chunks, buf = [], ""               # 按空行(票块)切分条,单票不拆两条消息
+                    for blk in full.split("\n\n"):
+                        if len(buf) + len(blk) + 2 > 3800:
+                            chunks.append(buf)
+                            buf = blk
+                        else:
+                            buf = ("%s\n\n%s" % (buf, blk)) if buf else blk
+                    chunks.append(buf)
+                    for c in chunks:                   # 企微 markdown 上限 4096 字节
+                        data = json.dumps({"msgtype": "markdown", "markdown": {"content": c}}).encode()
                         urllib.request.urlopen(urllib.request.Request(
                             hook, data=data, headers={"Content-Type": "application/json"}), timeout=10)
-                        n += 1
-                    print("已推送企微 %d 条(含LLM快报)" % n)
+                    print("已推送企微 %d 条(含LLM快报)" % len(chunks))
                 elif sckey:
                     body = urllib.parse.urlencode({
                         "title": "盘后监控:%d 触发 + LLM快报(%s)" % (len(todays), todays["date"].max()),
