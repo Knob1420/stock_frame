@@ -92,7 +92,9 @@ def run(push=False):
                                "date": str(df.index[-1].date()), "thesis": it.get("thesis", ""),
                                **snapshot(df)})
     json.dump(state, open(STATE_F, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
-    tracking = [{"code": k.split("|")[0], "rule": k.split("|")[1:] and "|".join(k.split("|")[1:]),
+    names = {it["code"]: it.get("name", "") for it in cfg["watchlist"]}
+    tracking = [{"code": k.split("|")[0], "name": names.get(k.split("|")[0], ""),
+                 "rule": k.split("|")[1:] and "|".join(k.split("|")[1:]),
                  "days": (pd.Timestamp.today() - pd.Timestamp(v[1])).days}
                 for k, v in state.items() if v[0] and v[1] and
                 (pd.Timestamp.today() - pd.Timestamp(v[1])).days > 0]
@@ -133,12 +135,12 @@ def format_report(events, tracking=None, briefs=None) -> str:
             norm = (r.replace("|", "(") + ")") if "|" in r else r   # near_ma|MA120 → near_ma(MA120)
             if (t["code"], norm) in event_rules:
                 continue                            # 今日事件里已列过的不再重复
-            d = by.setdefault(t["code"], {"days": t["days"], "rules": []})
+            d = by.setdefault(t["code"], {"days": t["days"], "name": t.get("name", ""), "rules": []})
             d["rules"].append(r)
         if by:
             lines.append("\n**跟踪中(钝化/持续状态,不推送):**")
             for code, d in sorted(by.items(), key=lambda kv: -kv[1]["days"]):
-                lines.append("- %s [%s] 已持续 %d 天" % (code, ",".join(d["rules"]), d["days"]))
+                lines.append("- %s %s [%s] 已持续 %d 天" % (code, d["name"], ",".join(d["rules"]), d["days"]))
     return "\n".join(lines)
 
 
