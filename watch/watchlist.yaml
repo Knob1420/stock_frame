@@ -11,7 +11,6 @@ defaults:
       params: {period: 120, tolerance: 0.02}
     - rule: near_ma
       params: {period: 240, tolerance: 0.02}
-    - rule: volume_dry_up
 
 watchlist:
   - code: "sh603690"

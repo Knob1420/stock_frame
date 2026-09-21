@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.parse
 import urllib.request
 
 import pandas as pd
@@ -99,44 +100,73 @@ def run(push=False):
         arc = pd.DataFrame(events)
         old = pd.read_parquet(ARCHIVE_F) if os.path.exists(ARCHIVE_F) else arc.iloc[:0]
         pd.concat([old, arc], ignore_index=True).to_parquet(ARCHIVE_F)
-    print(format_report(events, tracking))
-    if push and events:
-        hook = os.environ.get("WATCH_WEBHOOK", "")
-        if hook:
-            data = json.dumps({"msgtype": "markdown",
-                               "markdown": {"content": format_report(events)[:4000]}}).encode()
-            urllib.request.urlopen(urllib.request.Request(
-                hook, data=data, headers={"Content-Type": "application/json"}), timeout=10)
-            print("已推送企微")
-        else:
-            print("未设置 WATCH_WEBHOOK,跳过推送")
+    report_txt = format_report(events, tracking)
+    print(report_txt)
+    return report_txt
 
 
 def format_report(events, tracking=None) -> str:
     if not events and not tracking:
         return "✅ 盘后扫描:无触发(%s)" % pd.Timestamp.today().date()
     lines = ["**盘后监控快报 %s**" % pd.Timestamp.today().date()]
+    rules_by, order = {}, []                       # 同票多规则合并:快照只出一遍
     for e in events:
+        if e["code"] not in rules_by:
+            rules_by[e["code"]] = []
+            order.append(e)
+        rules_by[e["code"]].append(e["rule"])
+    if events:
+        lines.append("数据日 %s" % events[0]["date"])
+    for e in order:
         ma = " ".join("MA%d %+.1f%%" % (n, 100 * e["dist_ma%d" % n])
                       for n in (60, 120, 240) if e.get("dist_ma%d" % n) is not None)
-        lines.append("\n**%s %s** 触发[%s]\n> %s\n> 现价 %.2f | %s | 距52周高 %.1f%% 位置%.0f%% | 量比%.2f\n> thesis:%s" % (
-            e["code"], e["name"], e["rule"], e["date"], e["close"], ma,
-            100 * e["dd_52w"], 100 * e["pos_52w"], e["volr"], e["thesis"]))
+        thesis = "\n> thesis:%s" % e["thesis"] if e.get("thesis") else ""
+        lines.append("\n**%s %s** 触发[%s]\n> 现价 %.2f | %s | 距52周高 %.1f%% 位置%.0f%% | 量比%.2f%s" % (
+            e["code"], e["name"], "+".join(rules_by[e["code"]]), e["close"], ma,
+            100 * e["dd_52w"], 100 * e["pos_52w"], e["volr"], thesis))
     if tracking:
-        lines.append("\n**跟踪中(钝化/持续状态,不推送):**")
-        for t in sorted(tracking, key=lambda x: -x["days"]):
-            lines.append("- %s [%s] 已持续 %d 天" % (t["code"], t["rule"], t["days"]))
+        event_rules = {(e["code"], e["rule"]) for e in events}
+        by = {}                                     # 同票合并一行;rstrip 去空 hint 的尾部 |
+        for t in tracking:
+            r = t["rule"].rstrip("|")
+            norm = (r.replace("|", "(") + ")") if "|" in r else r   # near_ma|MA120 → near_ma(MA120)
+            if (t["code"], norm) in event_rules:
+                continue                            # 今日事件里已列过的不再重复
+            d = by.setdefault(t["code"], {"days": t["days"], "rules": []})
+            d["rules"].append(r)
+        if by:
+            lines.append("\n**跟踪中(钝化/持续状态,不推送):**")
+            for code, d in sorted(by.items(), key=lambda kv: -kv[1]["days"]):
+                lines.append("- %s [%s] 已持续 %d 天" % (code, ",".join(d["rules"]), d["days"]))
     return "\n".join(lines)
 
 
-def llm_brief(events):
-    """GLM(coding plan, Anthropic 兼容端点)六段快报:结构化输入→固定输出,禁止编造数字。"""
+def _brief_once(facts):
+    """单次 GLM 调用:一只票的事实文本 → 六段快报文本。"""
     import json as _j
+    key = os.environ.get("GLM_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+    prompt = ("你是盯盘助手。以下为该股今日触发的结构化事实(唯一信息来源,禁止编造数字)。"
+              "输出六段:①支撑位列表(来源:均线/近20日低点/箱体配置) ②压力位列表(来源同上) "
+              "③量价状态 ④当前位置评估 ⑤与thesis对照(当前是否符合低吸/关注的前置状态) ⑥风险提示。每段一行,简洁。\n\n" + facts)
+    body = _j.dumps({"model": os.environ.get("LLM_MODEL", "glm-5.3"),
+                     "max_tokens": 2000,
+                     "thinking": {"type": "disabled"},   # 快报是数字翻译非推理,关思考 7 倍提速
+                     "messages": [{"role": "user", "content": prompt}]}).encode()
+    base = os.environ.get("LLM_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
+    req = urllib.request.Request(base.rstrip("/") + "/v1/messages", data=body, headers={
+        "Content-Type": "application/json",
+        "x-api-key": key, "anthropic-version": "2023-06-01"})
+    r = _j.loads(urllib.request.urlopen(req, timeout=120).read())
+    return "".join(b.get("text", "") for b in r.get("content", []) if b.get("type") == "text").strip()
+
+
+def llm_brief(events):
+    """每票一次调用;同票多规则合并;单票失败不影响其他票。"""
     key = os.environ.get("GLM_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
     if not key:
         return "(未设置 GLM_API_KEY(.env),跳过 LLM 快报)"
     seen, uniq = set(), []
-    for e in events:                              # 同票多规则合并,减少 token
+    for e in events:                              # 同票多规则合并
         k = e["code"]
         if k not in seen:
             seen.add(k)
@@ -144,26 +174,18 @@ def llm_brief(events):
         else:
             for u in uniq:
                 if u["code"] == k:
-                    u["rule"] += "+" + e["rule"].split("(")[0]
-    facts = "\n".join(
-        "- %s %s 触发[%s] 现价%.2f 距MA60 %+.1f%% MA120 %+.1f%% MA240 %+.1f%% 距52周高 %.1f%% 52周位置%.0f%% 量比%.2f 近20日区间[%.2f,%.2f] thesis:%s" % (
+                    u["rule"] += "+" + e["rule"]
+    outs = []
+    for e in uniq:
+        facts = "- %s %s 触发[%s] 现价%.2f 距MA60 %+.1f%% MA120 %+.1f%% MA240 %+.1f%% 距52周高 %.1f%% 52周位置%.0f%% 量比%.2f 近20日区间[%.2f,%.2f] thesis:%s" % (
             e["code"], e["name"], e["rule"], e["close"],
             100 * e["dist_ma60"], 100 * e["dist_ma120"], 100 * e["dist_ma240"],
             100 * e["dd_52w"], 100 * e["pos_52w"], e["volr"], e["lo20"], e["hi20"], e["thesis"])
-        for e in uniq)
-    prompt = ("你是盯盘助手。以下为今日触发的结构化事实(唯一信息来源,禁止编造数字)。"
-              "对每只票输出六段:①支撑位列表(来源:均线/近20日低点/箱体配置) ②压力位列表(来源同上) "
-              "③量价状态 ④当前位置评估 ⑤与thesis对照(当前是否符合低吸/关注的前置状态) ⑥风险提示。每段一行,简洁。\n\n" + facts)
-    body = _j.dumps({"model": os.environ.get("LLM_MODEL", "glm-5.3"),
-                     "max_tokens": 16000,
-                     "messages": [{"role": "user", "content": prompt}]}).encode()
-    base = os.environ.get("LLM_BASE_URL", "https://open.bigmodel.cn/api/anthropic")
-    req = urllib.request.Request(base.rstrip("/") + "/v1/messages", data=body, headers={
-        "Content-Type": "application/json",
-        "x-api-key": key, "anthropic-version": "2023-06-01"})
-    r = _j.loads(urllib.request.urlopen(req, timeout=180).read())
-    txt = "".join(b.get("text", "") for b in r.get("content", []) if b.get("type") == "text")
-    return txt.strip() or "(模型返回空)"
+        try:
+            outs.append("**%s %s** 触发[%s]\n%s" % (e["code"], e["name"], e["rule"], _brief_once(facts)))
+        except Exception as ex:
+            outs.append("**%s %s** (该票分析失败: %s)" % (e["code"], e["name"], ex))
+    return "\n\n".join(outs)
 
 
 if __name__ == "__main__":
@@ -172,9 +194,42 @@ if __name__ == "__main__":
     ap.add_argument("--push", action="store_true")
     ap.add_argument("--llm", action="store_true", help="触发事件追加大模型六段快报")
     a = ap.parse_args()
-    run(a.push)
+    report_txt = run(a.push)
     if a.llm and os.path.exists(ARCHIVE_F):
         arc = pd.read_parquet(ARCHIVE_F)
         todays = arc[arc["date"] == arc["date"].max()]
         if len(todays):
-            print("\n===== LLM 快报 =====\n" + llm_brief(todays.to_dict("records")))
+            rd = os.path.join(HERE, "reports")            # 本地报告先落盘,LLM 失败不丢底稿
+            os.makedirs(rd, exist_ok=True)
+            rp = os.path.join(rd, todays["date"].max() + ".md")
+            with open(rp, "w", encoding="utf-8") as f:
+                f.write(report_txt)
+            try:
+                brief = llm_brief(todays.to_dict("records"))
+            except Exception as e:
+                brief = "(LLM 快报生成失败: %s)" % e
+            print("\n===== LLM 快报 =====\n" + brief)
+            with open(rp, "a", encoding="utf-8") as f:
+                f.write("\n\n===== LLM 快报 =====\n" + brief)
+            if a.push:                                            # 推送=规则报告+LLM快报(失败也推,带标注)
+                full = report_txt + "\n\n===== LLM 快报 =====\n" + brief
+                hook = os.environ.get("WATCH_WEBHOOK", "")
+                sckey = os.environ.get("SERVERCHAN_KEY", "")
+                if hook:
+                    n = 0
+                    for i in range(0, len(full), 3800):   # 企微 markdown 上限 4096 字节,分条推全
+                        data = json.dumps({"msgtype": "markdown",
+                                           "markdown": {"content": full[i:i + 3800]}}).encode()
+                        urllib.request.urlopen(urllib.request.Request(
+                            hook, data=data, headers={"Content-Type": "application/json"}), timeout=10)
+                        n += 1
+                    print("已推送企微 %d 条(含LLM快报)" % n)
+                elif sckey:
+                    body = urllib.parse.urlencode({
+                        "title": "盘后监控:%d 触发 + LLM快报(%s)" % (len(todays), todays["date"].max()),
+                        "desp": full[:30000]}).encode()
+                    urllib.request.urlopen(urllib.request.Request(
+                        "https://sctapi.ftqq.com/%s.send" % sckey, data=body), timeout=15)
+                    print("已推送 Server酱(含LLM快报)")
+        elif a.push and os.environ.get("SERVERCHAN_KEY", ""):
+            pass  # 无 LLM/无事件时不推(规则报告已在每日运行时打印+落盘)
