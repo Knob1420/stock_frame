@@ -100,12 +100,10 @@ def run(push=False):
         arc = pd.DataFrame(events)
         old = pd.read_parquet(ARCHIVE_F) if os.path.exists(ARCHIVE_F) else arc.iloc[:0]
         pd.concat([old, arc], ignore_index=True).to_parquet(ARCHIVE_F)
-    report_txt = format_report(events, tracking)
-    print(report_txt)
-    return report_txt
+    return events, tracking
 
 
-def format_report(events, tracking=None) -> str:
+def format_report(events, tracking=None, briefs=None) -> str:
     if not events and not tracking:
         return "✅ 盘后扫描:无触发(%s)" % pd.Timestamp.today().date()
     lines = ["**盘后监控快报 %s**" % pd.Timestamp.today().date()]
@@ -124,6 +122,9 @@ def format_report(events, tracking=None) -> str:
         lines.append("\n**%s %s** 触发[%s]\n> 现价 %.2f | %s | 距52周高 %.1f%% 位置%.0f%% | 量比%.2f%s" % (
             e["code"], e["name"], "+".join(rules_by[e["code"]]), e["close"], ma,
             100 * e["dd_52w"], 100 * e["pos_52w"], e["volr"], thesis))
+        b = (briefs or {}).get(e["code"])                 # LLM 解读紧跟该票事实,同块输出
+        if b:
+            lines[-1] += "\n" + b
     if tracking:
         event_rules = {(e["code"], e["rule"]) for e in events}
         by = {}                                     # 同票合并一行;rstrip 去空 hint 的尾部 |
@@ -161,80 +162,65 @@ def _brief_once(facts):
 
 
 def llm_brief(events):
-    """每票一次调用;同票多规则合并;单票失败不影响其他票。"""
+    """每票一次调用;返回 {code: 六段解读};单票失败不影响其他票。"""
     key = os.environ.get("GLM_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
     if not key:
-        return "(未设置 GLM_API_KEY(.env),跳过 LLM 快报)"
-    seen, uniq = set(), []
-    for e in events:                              # 同票多规则合并
-        k = e["code"]
-        if k not in seen:
-            seen.add(k)
-            uniq.append(e)
-        else:
-            for u in uniq:
-                if u["code"] == k:
-                    u["rule"] += "+" + e["rule"]
-    outs = []
-    for e in uniq:
+        return {}
+    merged = {}                                        # code -> 合并后的规则串
+    for e in events:
+        merged[e["code"]] = (merged[e["code"]] + "+" + e["rule"]) if e["code"] in merged else e["rule"]
+    outs = {}
+    first = {}                                         # code -> 该票首条事件(快照字段相同)
+    for e in events:
+        first.setdefault(e["code"], e)
+    for code, e in first.items():
         facts = "- %s %s 触发[%s] 现价%.2f 距MA60 %+.1f%% MA120 %+.1f%% MA240 %+.1f%% 距52周高 %.1f%% 52周位置%.0f%% 量比%.2f 近20日区间[%.2f,%.2f] thesis:%s" % (
-            e["code"], e["name"], e["rule"], e["close"],
+            e["code"], e["name"], merged[code], e["close"],
             100 * e["dist_ma60"], 100 * e["dist_ma120"], 100 * e["dist_ma240"],
             100 * e["dd_52w"], 100 * e["pos_52w"], e["volr"], e["lo20"], e["hi20"], e["thesis"])
         try:
-            outs.append("**%s %s** 触发[%s]\n%s" % (e["code"], e["name"], e["rule"], _brief_once(facts)))
+            outs[code] = _brief_once(facts)
         except Exception as ex:
-            outs.append("**%s %s** (该票分析失败: %s)" % (e["code"], e["name"], ex))
-    return "\n\n".join(outs)
+            outs[code] = "(该票分析失败: %s)" % ex
+    return outs
 
 
 if __name__ == "__main__":
     _load_env()
     ap = argparse.ArgumentParser()
     ap.add_argument("--push", action="store_true")
-    ap.add_argument("--llm", action="store_true", help="触发事件追加大模型六段快报")
+    ap.add_argument("--llm", action="store_true", help="每票事实后直接追加 LLM 六段解读")
     a = ap.parse_args()
-    report_txt = run(a.push)
-    if a.llm and os.path.exists(ARCHIVE_F):
-        arc = pd.read_parquet(ARCHIVE_F)
-        todays = arc[arc["date"] == arc["date"].max()]
-        if len(todays):
-            rd = os.path.join(HERE, "reports")            # 本地报告先落盘,LLM 失败不丢底稿
-            os.makedirs(rd, exist_ok=True)
-            rp = os.path.join(rd, todays["date"].max() + ".md")
-            with open(rp, "w", encoding="utf-8") as f:
-                f.write(report_txt)
-            try:
-                brief = llm_brief(todays.to_dict("records"))
-            except Exception as e:
-                brief = "(LLM 快报生成失败: %s)" % e
-            print("\n===== LLM 快报 =====\n" + brief)
-            with open(rp, "a", encoding="utf-8") as f:
-                f.write("\n\n===== LLM 快报 =====\n" + brief)
-            if a.push:                                            # 推送=规则报告+LLM快报(失败也推,带标注)
-                full = report_txt + "\n\n===== LLM 快报 =====\n" + brief
-                hook = os.environ.get("WATCH_WEBHOOK", "")
-                sckey = os.environ.get("SERVERCHAN_KEY", "")
-                if hook:
-                    chunks, buf = [], ""               # 按空行(票块)切分条,单票不拆两条消息
-                    for blk in full.split("\n\n"):
-                        if len(buf) + len(blk) + 2 > 3800:
-                            chunks.append(buf)
-                            buf = blk
-                        else:
-                            buf = ("%s\n\n%s" % (buf, blk)) if buf else blk
+    events, tracking = run(a.push)
+    briefs = llm_brief(events) if (a.llm and events) else {}
+    report_txt = format_report(events, tracking, briefs)
+    print(report_txt)
+    if a.llm and events:                                # 落盘一份完整版(事实+解读)
+        rd = os.path.join(HERE, "reports")
+        os.makedirs(rd, exist_ok=True)
+        with open(os.path.join(rd, events[0]["date"] + ".md"), "w", encoding="utf-8") as f:
+            f.write(report_txt)
+    if a.push and a.llm and events:
+        hook = os.environ.get("WATCH_WEBHOOK", "")
+        sckey = os.environ.get("SERVERCHAN_KEY", "")
+        if hook:
+            chunks, buf = [], ""                        # 按空行(票块)切分条,单票不拆两条消息
+            for blk in report_txt.split("\n\n"):
+                if len(buf) + len(blk) + 2 > 3800:
                     chunks.append(buf)
-                    for c in chunks:                   # 企微 markdown 上限 4096 字节
-                        data = json.dumps({"msgtype": "markdown", "markdown": {"content": c}}).encode()
-                        urllib.request.urlopen(urllib.request.Request(
-                            hook, data=data, headers={"Content-Type": "application/json"}), timeout=10)
-                    print("已推送企微 %d 条(含LLM快报)" % len(chunks))
-                elif sckey:
-                    body = urllib.parse.urlencode({
-                        "title": "盘后监控:%d 触发 + LLM快报(%s)" % (len(todays), todays["date"].max()),
-                        "desp": full[:30000]}).encode()
-                    urllib.request.urlopen(urllib.request.Request(
-                        "https://sctapi.ftqq.com/%s.send" % sckey, data=body), timeout=15)
-                    print("已推送 Server酱(含LLM快报)")
-        elif a.push and os.environ.get("SERVERCHAN_KEY", ""):
-            pass  # 无 LLM/无事件时不推(规则报告已在每日运行时打印+落盘)
+                    buf = blk
+                else:
+                    buf = ("%s\n\n%s" % (buf, blk)) if buf else blk
+            chunks.append(buf)
+            for c in chunks:                            # 企微 markdown 上限 4096 字节
+                data = json.dumps({"msgtype": "markdown", "markdown": {"content": c}}).encode()
+                urllib.request.urlopen(urllib.request.Request(
+                    hook, data=data, headers={"Content-Type": "application/json"}), timeout=10)
+            print("已推送企微 %d 条(含LLM解读)" % len(chunks))
+        elif sckey:
+            body = urllib.parse.urlencode({
+                "title": "盘后监控:%d 触发(%s)" % (len(briefs), events[0]["date"]),
+                "desp": report_txt[:30000]}).encode()
+            urllib.request.urlopen(urllib.request.Request(
+                "https://sctapi.ftqq.com/%s.send" % sckey, data=body), timeout=15)
+            print("已推送 Server酱(含LLM解读)")
