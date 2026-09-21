@@ -72,13 +72,18 @@ def snapshot(df, params_ma=(60, 120, 240)) -> dict:
     return s
 
 
-def market_context(ind_dir=IND, bench="sh000300"):
-    """全市场宽度统计 + 基准指数状态 → 大盘环境一行文本(LLM prompt 每轮共用一份)。
+_MKT_CACHE = {}
 
-    自建指标库全量扫描(约6100只,列裁剪读取约60s):涨跌家数、站上年线比例、
+
+def _market_scan(ind_dir=IND, bench="sh000300"):
+    """全市场宽度统计 + 基准指数 → dict(模块级缓存,一轮一份;LLM 文本与大盘图共用)。
+
+    自建指标库全量扫描(约5500只,列裁剪读取约60s):涨跌家数、站上年线比例、
     中位量比 + 沪深300 近期涨跌/距年线。数据日以基准指数日历末为准,末行不同日
     的(北交所/退市残留,bj 段数据源不更新)不计入。任何一步失败都降级而非中断。
     """
+    if _MKT_CACHE:
+        return _MKT_CACHE
     try:                                                       # 基准指数先行:定数据日
         b = pd.read_parquet(os.path.join(ind_dir, "%s.parquet" % bench),
                             columns=["close", "ma240"])
@@ -112,22 +117,39 @@ def market_context(ind_dir=IND, bench="sh000300"):
         vm = df["vma20"].iloc[-1]
         if pd.notna(vm) and vm > 0:
             vrs.append(float(df["volume"].iloc[-1] / vm))
-    parts = []
-    if total:
-        parts.append("涨%d/跌%d/平%d" % (adv, dec, flat))
-        parts.append("站上年线(MA240) %d/%d 只(%.0f%%)" % (above, total, 100.0 * above / total))
-    if vrs:
-        parts.append("中位量比%.2f" % statistics.median(vrs))
-    if b is not None:
+    st = {"date": d or "?", "adv": adv, "dec": dec, "flat": flat,
+          "above": above, "total": total,
+          "med_vr": round(statistics.median(vrs), 2) if vrs else None,
+          "bench_df": b}
+    if b is not None and len(b) > 21:
         c = b["close"].iloc[-1]
-        txt = "沪深300 近5日%+.1f%% 近20日%+.1f%%" % (
-            100 * (c / b["close"].iloc[-6] - 1), 100 * (c / b["close"].iloc[-21] - 1))
+        st["bench_d5"] = float(c / b["close"].iloc[-6] - 1)
+        st["bench_d20"] = float(c / b["close"].iloc[-21] - 1)
         if pd.notna(b["ma240"].iloc[-1]):
-            txt += " 距年线%+.1f%%" % (100 * (c / b["ma240"].iloc[-1] - 1))
+            st["bench_dist240"] = float(c / b["ma240"].iloc[-1] - 1)
+    _MKT_CACHE.update(st)
+    return st
+
+
+def market_context(ind_dir=IND):
+    """大盘环境一行文本(LLM prompt 用),来自 _market_scan。"""
+    st = _market_scan(ind_dir)
+    parts = []
+    if st["total"]:
+        parts.append("涨%d/跌%d/平%d" % (st["adv"], st["dec"], st["flat"]))
+        parts.append("站上年线(MA240) %d/%d 只(%.0f%%)"
+                     % (st["above"], st["total"], 100.0 * st["above"] / st["total"]))
+    if st["med_vr"] is not None:
+        parts.append("中位量比%.2f" % st["med_vr"])
+    if "bench_d5" in st:
+        txt = "沪深300 近5日%+.1f%% 近20日%+.1f%%" % (100 * st["bench_d5"], 100 * st["bench_d20"])
+        if "bench_dist240" in st:
+            txt += " 距年线%+.1f%%" % (100 * st["bench_dist240"])
         parts.append(txt)
     if not parts:
         return "大盘环境:统计不可用"
-    return "大盘环境(数据日%s,全市场%d只): %s" % (d or "?", adv + dec + flat, "; ".join(parts))
+    return "大盘环境(数据日%s,全市场%d只): %s" % (
+        st["date"], st["adv"] + st["dec"] + st["flat"], "; ".join(parts))
 
 
 def run(push=False):
@@ -203,7 +225,8 @@ def format_report(events, tracking=None, briefs=None) -> str:
             100 * e["dd_52w"], 100 * e["pos_52w"], e["volr"], thesis))
         b = (briefs or {}).get(e["code"])                 # LLM 解读紧跟该票事实,同块输出
         if b:
-            lines[-1] += "\n" + b
+            lines[-1] += "\n" + "\n".join(
+                seg.strip() for seg in b.split("\n\n") if seg.strip())
     if tracking:
         event_rules = {(e["code"], e["rule"]) for e in events}
         by = {}                                     # 同票合并一行;rstrip 去空 hint 的尾部 |
@@ -305,23 +328,67 @@ if __name__ == "__main__":
         os.makedirs(rd, exist_ok=True)
         with open(os.path.join(rd, events[0]["date"] + ".md"), "w", encoding="utf-8") as f:
             f.write(report_txt)
-    if a.push and a.llm and events:
+    # 配图:大盘总览一张 + 每票一张(有事件才生成;单图失败不阻断)
+    charts = {}
+    if events:
+        try:
+            import chart as _chart
+            cdir = os.path.join(HERE, "reports", "charts", events[0]["date"])
+            os.makedirs(cdir, exist_ok=True)
+            st = _market_scan()
+            if st["bench_df"] is not None:
+                charts["market"] = _chart.market_chart(
+                    st["bench_df"], st, os.path.join(cdir, "market.png"))
+            merged, first = {}, {}
+            for e in events:
+                merged[e["code"]] = (merged[e["code"]] + "+" + e["rule"]) if e["code"] in merged else e["rule"]
+                first.setdefault(e["code"], e)
+            for code, e in first.items():
+                try:
+                    df = pd.read_parquet(os.path.join(IND, "%s.parquet" % code))
+                    df.index = pd.DatetimeIndex(df.index)
+                    charts[code] = _chart.stock_chart(
+                        df, code, e["name"], merged[code], e["close"],
+                        os.path.join(cdir, "%s.png" % code))
+                except Exception as ex:
+                    print("⚠ %s 配图失败: %s" % (code, ex))
+        except Exception as ex:
+            print("⚠ 大盘图失败: %s" % ex)
+
+    if a.push and events:
         hook = os.environ.get("WATCH_WEBHOOK", "")
         sckey = os.environ.get("SERVERCHAN_KEY", "")
         if hook:
-            chunks, buf = [], ""                        # 按空行(票块)切分条,单票不拆两条消息
-            for blk in report_txt.split("\n\n"):
-                if len(buf) + len(blk) + 2 > 3800:
-                    chunks.append(buf)
-                    buf = blk
-                else:
-                    buf = ("%s\n\n%s" % (buf, blk)) if buf else blk
-            chunks.append(buf)
-            for c in chunks:                            # 企微 markdown 上限 4096 字节
-                data = json.dumps({"msgtype": "markdown", "markdown": {"content": c}}).encode()
+            import base64
+            import hashlib
+            import re
+            import time as _t
+
+            def _send(payload):
                 urllib.request.urlopen(urllib.request.Request(
-                    hook, data=data, headers={"Content-Type": "application/json"}), timeout=10)
-            print("已推送企微 %d 条(含LLM解读)" % len(chunks))
+                    hook, data=json.dumps(payload).encode(),
+                    headers={"Content-Type": "application/json"}), timeout=10)
+                _t.sleep(3.1)                          # 企微机器人限 20 条/分钟
+
+            def _img(p):
+                b = open(p, "rb").read()
+                return {"msgtype": "image",
+                        "image": {"base64": base64.b64encode(b).decode(),
+                                  "md5": hashlib.md5(b).hexdigest()}}
+
+            n_img = 0
+            blocks = [b.strip() for b in report_txt.split("\n\n") if b.strip()]
+            for i, blk in enumerate(blocks):            # 企微 markdown 上限 4096 字节
+                for j in range(0, len(blk), 3800):
+                    _send({"msgtype": "markdown", "markdown": {"content": blk[j:j + 3800]}})
+                if i == 0 and "market" in charts:      # 头部块后跟大盘总览图
+                    _send(_img(charts["market"]))
+                    n_img += 1
+                m = re.match(r"\*\*(sh\d{6}|sz\d{6}|bj\d{6})", blk)
+                if m and m.group(1) in charts:          # 各票文字块后跟该票图
+                    _send(_img(charts[m.group(1)]))
+                    n_img += 1
+            print("已推送企微: %d 个文本块 + %d 张图" % (len(blocks), n_img))
         elif sckey:
             body = urllib.parse.urlencode({
                 "title": "盘后监控:%d 触发(%s)" % (len(briefs), events[0]["date"]),
