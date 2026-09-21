@@ -4,7 +4,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BATCH_SIZE=200
 QLIB_URI="$SCRIPT_DIR/qlib_bin"
 ALL_FILE="$QLIB_URI/instruments/all.txt"
-PY="/home/zjlab/anaconda3/envs/qlib/bin/python3"
+PY="$SCRIPT_DIR/../.venv/bin/python"
 
 # 提取完整符号（首列，已含市场前缀），转小写，过滤空行
 mapfile -t SYMS < <(awk -F'\t' '{print tolower($1)}' "$ALL_FILE" | grep -v '^$')

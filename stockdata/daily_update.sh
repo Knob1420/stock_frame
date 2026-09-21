@@ -8,7 +8,7 @@
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_PY="/home/zjlab/anaconda3/envs/qlib/bin/python3"
+VENV_PY="$SCRIPT_DIR/../.venv/bin/python"
 LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/daily_$(date '+%Y%m%d_%H%M%S').log"
 
