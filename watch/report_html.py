@@ -6,7 +6,9 @@ scan.py 末尾自动调用;独立重渲染: python report_html.py <date>(Task 5 
 """
 import base64
 import glob
+import json
 import os
+import sys
 
 import jinja2
 import pandas as pd
@@ -67,6 +69,25 @@ CARD_T = """<section id="cards"><h2>③ 今日触发 <small>{{ n }} 只</small><
 {% if c.thesis %}<p class="kv">thesis: {{ c.thesis }}</p>{% endif %}
 </div>{% endfor %}</section>"""
 
+BF_T = """<section id="backfill"><h2>⑤ 历史回填 <small>近{{ lookback }}个交易日触发的后续验证</small></h2>
+{% if rows %}<table><tr><th>触发日</th><th>代码</th><th>名称</th><th>规则</th><th>触发价</th>
+<th>已过</th><th>至今</th><th>fwd5</th><th>fwd10</th><th>fwd20</th><th>期间最高</th><th>期间最低</th><th>LLM当时判定</th></tr>
+{% for r in rows %}<tr{% if r.ms %} class="ms"{% endif %}><td>{{ r.date }}</td><td>{{ r.code }}</td><td>{{ r.name }}</td>
+<td>{{ r.rule }}</td><td>{{ r.trig }}</td><td>{{ r.elapsed }}日{% if r.ms %} <span class="badge">满{{ r.ms }}日</span>{% endif %}</td>
+<td class="{{ r.cls_now }}">{{ r.ret_now }}</td><td>{{ r.f5 }}</td><td>{{ r.f10 }}</td><td>{{ r.f20 }}</td>
+<td class="{{ r.cls_mfe }}">{{ r.mfe }}</td><td class="{{ r.cls_mae }}">{{ r.mae }}</td><td class="muted">{{ r.verdict }}</td></tr>{% endfor %}
+</table>
+{% if hidden %}<details><summary>其余 {{ hidden }} 条(未满里程碑)</summary><table>
+<tr><th>触发日</th><th>代码</th><th>规则</th><th>已过</th><th>至今</th><th>fwd5</th><th>fwd10</th><th>fwd20</th></tr>
+{% for r in hidden_rows %}<tr><td>{{ r.date }}</td><td>{{ r.code }}</td><td>{{ r.rule }}</td><td>{{ r.elapsed }}日</td>
+<td>{{ r.ret_now }}</td><td>{{ r.f5 }}</td><td>{{ r.f10 }}</td><td>{{ r.f20 }}</td></tr>{% endfor %}</table></details>{% endif %}
+{% else %}<p class="muted">暂无可回填事件</p>{% endif %}</section>"""
+
+QA_T = """<section id="qa"><h2>⑥ 追问记录</h2>
+{% if qas %}{% for q in qas %}<details><summary>{{ q.code }} · {{ q.q }}</summary>
+<pre>{{ q.a }}</pre><p class="muted">{{ q.ts }}</p></details>{% endfor %}
+{% else %}<p class="muted">今日无追问(二期 ask.py 写入 qa/<date>.json 后自动出现)</p>{% endif %}</section>"""
+
 TRACK_T = """<section id="track"><h2>④ 跟踪中 <small>持续触发未钝化</small></h2>
 {% if rows %}<table><tr><th>代码</th><th>名称</th><th>规则</th><th>持续天数</th></tr>
 {% for r in rows %}<tr><td>{{ r.code }}</td><td>{{ r.name }}</td><td>{{ r.rule }}</td><td>{{ r.days }}</td></tr>{% endfor %}
@@ -109,6 +130,20 @@ def seg(brief, n=5):
         if s.startswith(_CN[n]):
             return s[1:].strip() or s
     return brief.strip().splitlines()[0]
+
+
+def _load_brief(date, out_dir):
+    """读该日 briefs JSON → {code: {...}};缺文件/损坏返回 {}。"""
+    try:
+        return json.load(open(os.path.join(out_dir, "briefs", "%s.json" % date),
+                              encoding="utf-8"))["briefs"]
+    except Exception:
+        return {}
+
+
+def _cls(x):
+    """涨红跌绿(A股惯例)class;None → 空。"""
+    return "" if _nan(x) else ("pos" if x > 0 else "neg" if x < 0 else "")
 
 
 def _sec_market(**kw):
@@ -192,19 +227,58 @@ def _sec_cards(**kw):
     return jinja2.Template(CARD_T).render(n=len(cards), cards=cards)
 
 
+def _sec_backfill(**kw):
+    import backfill as bf
+    af = kw.get("archive_f") or bf.ARCHIVE_F
+    idir = kw.get("ind_dir") or bf.IND
+    st = bf.forward_stats(archive_f=af, ind_dir=idir)
+    if st.empty:
+        return jinja2.Template(BF_T).render(rows=[], hidden=0, hidden_rows=[], lookback=20)
+    briefs_by_date = {d: _load_brief(d, kw["out_dir"]) for d in sorted(set(st["date"]))}
+
+    def _row(r):
+        v = seg(briefs_by_date.get(r["date"], {}).get(r["code"], {}).get("brief", ""), 5)
+        return {"date": r["date"], "code": r["code"], "name": r.get("name", ""),
+                "rule": r["rule"], "trig": _f(r["trig_close"]),
+                "elapsed": r["elapsed"], "ms": r["milestone"],
+                "ret_now": _pct(r["ret_now"]), "cls_now": _cls(r["ret_now"]),
+                "f5": _pct(r["fwd5"]), "f10": _pct(r["fwd10"]), "f20": _pct(r["fwd20"]),
+                "mfe": _pct(r["mfe"]), "cls_mfe": _cls(r["mfe"]),
+                "mae": _pct(r["mae"]), "cls_mae": _cls(r["mae"]),
+                "verdict": (v[:30] + "…") if len(v) > 30 else v}
+
+    allr = [_row(r) for _, r in st.iloc[::-1].iterrows()]        # 新在前
+    ms_rows = [r for r in allr if r["ms"]]                       # milestone 默认展示,其余折叠
+    rest = [r for r in allr if not r["ms"]]
+    return jinja2.Template(BF_T).render(rows=ms_rows, hidden=len(rest),
+                                         hidden_rows=rest, lookback=20)
+
+
+def _sec_qa(**kw):
+    try:
+        qas = json.load(open(os.path.join(kw["out_dir"], "qa", "%s.json" % kw["date"]),
+                             encoding="utf-8")).get("qa", [])
+    except Exception:
+        qas = []
+    return jinja2.Template(QA_T).render(qas=qas)
+
+
 def _sec_tracking(**kw):
     rows = kw["tracking"] or []
     return jinja2.Template(TRACK_T).render(rows=rows)
 
 
-def build(events, tracking, briefs, charts, market, date, out_dir=REPORTS):
-    """渲染单日 HTML + index.html,返回 HTML 路径;单区失败降级为错误行不阻断。"""
+def build(events, tracking, briefs, charts, market, date, out_dir=REPORTS,
+          archive_f=None, ind_dir=None):
+    """渲染单日 HTML + index.html,返回 HTML 路径;单区失败降级为错误行不阻断。
+    archive_f/ind_dir:⑤区回填数据源注入(测试/独立场景用,默认 backfill 模块常量)。"""
     os.makedirs(out_dir, exist_ok=True)
     secs = []
-    for fn in (_sec_market, _sec_sector, _sec_cards, _sec_tracking):
+    for fn in (_sec_market, _sec_sector, _sec_cards, _sec_tracking, _sec_backfill, _sec_qa):
         try:
             secs.append(fn(events=events, tracking=tracking, briefs=briefs,
-                           charts=charts, market=market, date=date, out_dir=out_dir))
+                           charts=charts, market=market, date=date, out_dir=out_dir,
+                           archive_f=archive_f, ind_dir=ind_dir))
         except Exception as ex:
             secs.append('<section><h2>⚠ %s 渲染失败: %s</h2></section>' % (fn.__name__, ex))
     html = jinja2.Template(PAGE_T).render(
@@ -230,3 +304,28 @@ def write_index(out_dir=REPORTS):
             '<table><tr><th>日期</th><th></th></tr>%s</table></body></html>') % rows
     with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8") as f:
         f.write(html)
+
+
+if __name__ == "__main__":
+    """独立重渲染: python report_html.py [date] —— 从 archive/briefs/charts/qa 重建该日 HTML。"""
+    import backfill as bf
+    d = sys.argv[1] if len(sys.argv) > 1 else str(pd.Timestamp.today().date())
+    events = []
+    if os.path.exists(bf.ARCHIVE_F):
+        arc = pd.read_parquet(bf.ARCHIVE_F)
+        events = arc[arc["date"].astype(str) == d].to_dict("records")
+    briefs = {}
+    try:
+        briefs = _load_brief(d, REPORTS)
+    except Exception:
+        pass
+    charts = {"market": os.path.join(REPORTS, "charts", d, "market.png")}
+    for e in events:
+        charts[e["code"]] = os.path.join(REPORTS, "charts", d, "%s.png" % e["code"])
+    market = {}
+    try:
+        import scan as _scan
+        market = _scan._market_scan()
+    except Exception:
+        pass
+    print(build(events, [], briefs, charts, market, d))

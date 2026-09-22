@@ -86,3 +86,40 @@ def test_bench_row(tmp_path):
     assert r is not None and r["name"] == "沪深300"
     assert r["d120"] == "+0.0%" and r["rsi"] == "50.00"     # 恒定价格:距MA120=0
     assert _bench_row(ind_dir=str(tmp_path / "none")) is None   # 缺文件 → None(对比表降级)
+
+
+def test_backfill_and_qa_sections(tmp_path):
+    import json
+    import pandas as pd
+    from util import write_px
+    ind = tmp_path / "ind"
+    px = [10, 10.5, 11, 10.8, 10.5, 10.2, 10.6, 11.2, 11.5, 12.0, 11.8, 10.9]
+    idx = write_px(ind / "sz000001.parquet", px)
+    d5 = str(idx[6].date())          # 触发后至今=5个交易日 → milestone
+    pd.DataFrame([{"code": "sz000001", "name": "测试", "rule": "b1", "date": d5, "close": 10.6}]
+                 ).to_parquet(tmp_path / "archive.parquet")
+    bd = tmp_path / "briefs"
+    bd.mkdir()
+    json.dump({"date": d5, "briefs": {"sz000001": {
+        "rules": "b1", "close": 10.6, "thesis": "", "brief": "①a\n②b\n③c\n④d\n⑤回踩企稳可观察\n⑥e"}}},
+        open(bd / ("%s.json" % d5), "w", encoding="utf-8"), ensure_ascii=False)
+    qd = tmp_path / "qa"
+    qd.mkdir()
+    json.dump({"date": "2026-09-21", "qa": [{"code": "sz000001", "q": "地量标准?",
+                                             "a": "量比<0.5 且低于250日20分位", "ts": "21:30"}]},
+              open(qd / "2026-09-21.json", "w", encoding="utf-8"), ensure_ascii=False)
+    p = build(events=[], tracking=[], briefs={}, charts={}, market=MARKET, date="2026-09-21",
+              out_dir=str(tmp_path), archive_f=str(tmp_path / "archive.parquet"), ind_dir=str(ind))
+    html = open(p, encoding="utf-8").read()
+    assert "⑤ 历史回填" in html and d5 in html
+    assert 'class="ms"' in html and "满5日" in html              # milestone 高亮
+    assert "回踩企稳可观察" in html                               # LLM当时判定来自briefs JSON
+    assert "⑥ 追问记录" in html and "地量标准?" in html and "量比<0.5" in html
+    assert "+2.8%" in html                                       # ret_now=10.9/10.6-1(现价口径)
+
+
+def test_backfill_empty(tmp_path):
+    p = build(events=[], tracking=[], briefs={}, charts={}, market=MARKET, date="2026-09-21",
+              out_dir=str(tmp_path), archive_f=str(tmp_path / "none.parquet"), ind_dir=str(tmp_path))
+    html = open(p, encoding="utf-8").read()
+    assert "暂无可回填事件" in html and "今日无追问" in html
