@@ -315,6 +315,29 @@ def llm_brief(events):
     return outs
 
 
+BRIEFS_DIR = os.path.join(HERE, "reports", "briefs")
+
+
+def save_briefs(date, briefs, events, out_dir=None):
+    """LLM 六段快报结构化落盘(层4命中率的物理前提);重复运行同日覆盖(幂等)。"""
+    if not briefs:
+        return None
+    d = out_dir or BRIEFS_DIR
+    os.makedirs(d, exist_ok=True)
+    first, merged = {}, {}
+    for e in events:
+        first.setdefault(e["code"], e)
+        merged[e["code"]] = (merged[e["code"]] + "+" + e["rule"]) if e["code"] in merged else e["rule"]
+    payload = {"date": date, "briefs": {
+        code: {"rules": merged.get(code, ""), "close": first[code]["close"],
+               "thesis": first[code].get("thesis", ""), "brief": txt}
+        for code, txt in briefs.items()}}
+    p = os.path.join(d, "%s.json" % date)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=1)
+    return p
+
+
 if __name__ == "__main__":
     _load_env()
     ap = argparse.ArgumentParser()
@@ -330,6 +353,7 @@ if __name__ == "__main__":
         os.makedirs(rd, exist_ok=True)
         with open(os.path.join(rd, events[0]["date"] + ".md"), "w", encoding="utf-8") as f:
             f.write(report_txt)
+        save_briefs(events[0]["date"], briefs, events)
     # 配图:大盘总览一张 + 每票一张(有事件才生成;单图失败不阻断)
     charts = {}
     if events:
