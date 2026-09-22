@@ -90,3 +90,11 @@ cron 周一至五 18:35 主跑、20:35/21:35 兜底（数据源偶尔晚发布�
 - 必须 `.venv` 的 python（`daily_update.sh` 已内置绝对路径），系统 python 无 numpy/qlib
 - 禁止 `python3 build_indicators.py` 全市场单进程直跑（OOM）；只能经分批脚本
 - 预警扫描（`scan_alerts.py`）尚未适配本机（Windows 路径残留），与本管道无关，勿调用
+
+## watch 单元测试
+
+盯盘/backfill/日报渲染的单测（改动 watch/ 下代码后必跑）：
+
+```bash
+cd /home/admin/stock_frame/watch && ../.venv/bin/python -m pytest tests/ -v
+```

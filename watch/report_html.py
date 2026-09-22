@@ -146,6 +146,16 @@ def _cls(x):
     return "" if _nan(x) else ("pos" if x > 0 else "neg" if x < 0 else "")
 
 
+def _tri(v):
+    """3元组字段容错:None/长度异常→(None,None,None);兼容 list 与 ndarray(archive回读)。"""
+    if v is None:
+        return (None, None, None)
+    try:
+        return tuple(v) if len(v) == 3 else (None, None, None)
+    except TypeError:
+        return (None, None, None)
+
+
 def _sec_market(**kw):
     st = kw["market"] or {}
     m = {"date": st.get("date", "?"), "adv": st.get("adv", "N/A"), "dec": st.get("dec", "N/A"),
@@ -205,9 +215,9 @@ def _sec_cards(**kw):
     cards = []
     for e in order:
         b = (briefs.get(e["code"]) or "").strip()
-        k, d, j = e.get("kdj") or (None, None, None)
-        dif, dea, hist = e.get("macd") or (None, None, None)
-        up, mid, low = e.get("boll") or (None, None, None)
+        k, d, j = _tri(e.get("kdj"))
+        dif, dea, hist = _tri(e.get("macd"))
+        up, mid, low = _tri(e.get("boll"))
         verdict = seg(b, 5)
         cards.append({
             "code": e["code"], "name": e.get("name", ""), "rules": merged[e["code"]],

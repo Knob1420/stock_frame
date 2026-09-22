@@ -123,3 +123,16 @@ def test_backfill_empty(tmp_path):
               out_dir=str(tmp_path), archive_f=str(tmp_path / "none.parquet"), ind_dir=str(tmp_path))
     html = open(p, encoding="utf-8").read()
     assert "暂无可回填事件" in html and "今日无追问" in html
+
+
+def test_cards_from_archive_arrays(tmp_path):
+    """重建路径:archive parquet 回读的 kdj/macd/boll 是 ndarray,卡片渲染不得炸。"""
+    import numpy as np
+    ev = [_ev("sh600519", "贵州茅台")]
+    ev[0]["kdj"] = np.array([18.0, 22.0, 6.0])
+    ev[0]["macd"] = np.array([-0.1, -0.08, -0.02])
+    ev[0]["boll"] = np.array([11.8, 11.0, 10.2])
+    p = build(events=ev, tracking=[], briefs={}, charts={}, market=MARKET,
+              date="2026-09-21", out_dir=str(tmp_path))
+    html = open(p, encoding="utf-8").read()
+    assert "sh600519 贵州茅台" in html and "18/22/6" in html

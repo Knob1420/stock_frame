@@ -80,19 +80,18 @@ def _market_scan(ind_dir=IND, bench="sh000300"):
     """全市场宽度统计 + 基准指数 → dict(模块级缓存,一轮一份;LLM 文本与大盘图共用)。
 
     自建指标库全量扫描(约5500只,列裁剪读取约60s):涨跌家数、站上年线比例、
-    中位量比 + 沪深300 近期涨跌/距年线。数据日以基准指数日历末为准,末行不同日
-    的(北交所/退市残留,bj 段数据源不更新)不计入。任何一步失败都降级而非中断。
+    中位量比 + 沪深300 近期涨跌/距年线。数据日取**个股多数派末行日期**——基准指数
+    序列可能滞后个股一天(chenditc 源),不能当锚;末行不在多数派日期的(北交所/
+    退市残留,bj 段数据源覆盖不全)不计入。任何一步失败都降级而非中断。
     """
     if _MKT_CACHE:
         return _MKT_CACHE
-    try:                                                       # 基准指数先行:定数据日
+    try:                                                       # 基准指数(只供自身数值)
         b = pd.read_parquet(os.path.join(ind_dir, "%s.parquet" % bench),
                             columns=["close"])
-        d = str(b.index[-1])[:10]
     except Exception:
-        b, d = None, None
-    adv = dec = flat = above = total = 0
-    vrs = []
+        b = None
+    rows = []                                                  # (末行日,涨/跌/平,above,total?,vr)
     for fn in sorted(os.listdir(ind_dir)):
         if not fn.endswith(".parquet") or fn[:-8].startswith(("sh000", "sz39")):
             continue                                           # 指数/板块系列不计入个股统计
@@ -101,24 +100,25 @@ def _market_scan(ind_dir=IND, bench="sh000300"):
                                  columns=["close", "volume", "vma20"])
         except Exception:
             continue
-        if len(df) < 2 or (d and str(df.index[-1])[:10] != d):
+        if len(df) < 2:
             continue
+        end = str(df.index[-1])[:10]
         last, prev = df["close"].iloc[-1], df["close"].iloc[-2]
-        if last > prev:
-            adv += 1
-        elif last < prev:
-            dec += 1
-        else:
-            flat += 1
+        chg = 1 if last > prev else (-1 if last < prev else 0)
         m = df["close"].rolling(250, min_periods=250).mean().iloc[-1]   # 年线=MA250,滚动现算
-        if pd.notna(m):
-            total += 1
-            if last > m:
-                above += 1
         vm = df["vma20"].iloc[-1]
-        if pd.notna(vm) and vm > 0:
-            vrs.append(float(df["volume"].iloc[-1] / vm))
-    st = {"date": d or "?", "adv": adv, "dec": dec, "flat": flat,
+        rows.append((end, chg, None if pd.isna(m) else bool(last > m),
+                     pd.notna(vm) and vm > 0,
+                     None if pd.isna(vm) or vm <= 0 else float(df["volume"].iloc[-1] / vm)))
+    d = statistics.mode(r[0] for r in rows) if rows else "?"
+    pick = [r for r in rows if r[0] == d]
+    adv = sum(1 for r in pick if r[1] == 1)
+    dec = sum(1 for r in pick if r[1] == -1)
+    flat = len(pick) - adv - dec
+    ma_ok = [r for r in pick if r[2] is not None]
+    total, above = len(ma_ok), sum(1 for r in ma_ok if r[2])
+    vrs = [r[4] for r in pick if r[4] is not None]
+    st = {"date": d, "adv": adv, "dec": dec, "flat": flat,
           "above": above, "total": total,
           "med_vr": round(statistics.median(vrs), 2) if vrs else None,
           "bench_df": b}
@@ -346,25 +346,23 @@ if __name__ == "__main__":
     a = ap.parse_args()
     events, tracking = run(a.push)
     briefs = llm_brief(events) if (a.llm and events) else {}
-    report_txt = format_report(events, tracking, briefs)
-    print(report_txt)
-    if a.llm and events:                                # 落盘一份完整版(事实+解读)
-        rd = os.path.join(HERE, "reports")
-        os.makedirs(rd, exist_ok=True)
-        with open(os.path.join(rd, events[0]["date"] + ".md"), "w", encoding="utf-8") as f:
-            f.write(report_txt)
-        save_briefs(events[0]["date"], briefs, events)
-    # 配图:大盘总览一张 + 每票一张(有事件才生成;单图失败不阻断)
+    # 大盘统计/数据日先行:无触发日也要出①④⑤区,数据日=事件日→基准指数日→今天
+    st = _market_scan()
+    date = events[0]["date"] if events else (
+        st.get("date") if st.get("date") not in (None, "?") else str(pd.Timestamp.today().date()))
     charts = {}
-    if events:
+    cdir = os.path.join(HERE, "reports", "charts", date)
+    os.makedirs(cdir, exist_ok=True)
+    if st.get("bench_df") is not None:                      # 大盘图无条件生成(①区配图)
         try:
             import chart as _chart
-            cdir = os.path.join(HERE, "reports", "charts", events[0]["date"])
-            os.makedirs(cdir, exist_ok=True)
-            st = _market_scan()
-            if st["bench_df"] is not None:
-                charts["market"] = _chart.market_chart(
-                    st["bench_df"], st, os.path.join(cdir, "market.png"))
+            charts["market"] = _chart.market_chart(
+                st["bench_df"], st, os.path.join(cdir, "market.png"))
+        except Exception as ex:
+            print("⚠ 大盘图失败: %s" % ex)
+    if events:                                              # 每票一张(单图失败不阻断)
+        try:
+            import chart as _chart
             merged, first = {}, {}
             for e in events:
                 merged[e["code"]] = (merged[e["code"]] + "+" + e["rule"]) if e["code"] in merged else e["rule"]
@@ -379,8 +377,30 @@ if __name__ == "__main__":
                 except Exception as ex:
                     print("⚠ %s 配图失败: %s" % (code, ex))
         except Exception as ex:
-            print("⚠ 大盘图失败: %s" % ex)
-
+            print("⚠ 个股配图失败: %s" % ex)
+    # HTML 日报(层2主展示形态;无事件也生成,失败不阻断推送)
+    # 覆盖保护:当日完整版已存在且本次无新事件(状态已消费的重复运行)则不覆盖——
+    # 否则重复跑 scan 会把有卡片的日报覆盖成空事件版;完整重建用 python report_html.py <date>
+    html_p = os.path.join(HERE, "reports", "%s.html" % date)
+    html_path = None
+    try:
+        import report_html
+        if events or not os.path.exists(html_p):
+            html_path = report_html.build(events, tracking, briefs, charts, st, date)
+        else:
+            html_path = html_p
+    except Exception as ex:
+        print("⚠ HTML日报失败: %s" % ex)
+    report_txt = format_report(events, tracking, briefs)
+    if html_path:
+        report_txt += "\n\n📄 当日详情: watch/reports/%s.html" % date
+    print(report_txt)
+    if a.llm and events:                                    # 落盘完整版md + 快报JSON
+        rd = os.path.join(HERE, "reports")
+        os.makedirs(rd, exist_ok=True)
+        with open(os.path.join(rd, date + ".md"), "w", encoding="utf-8") as f:
+            f.write(report_txt)
+        save_briefs(date, briefs, events)
     if a.push and events:
         hook = os.environ.get("WATCH_WEBHOOK", "")
         sckey = os.environ.get("SERVERCHAN_KEY", "")
