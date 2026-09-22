@@ -43,7 +43,7 @@ def _r(x, nd=2):
     return round(float(x), nd)
 
 
-def snapshot(df, params_ma=(60, 120, 240)) -> dict:
+def snapshot(df, params_ma=(120, 250, 360)) -> dict:
     """触发时刻特征快照(研究管线的标注字段,LLM 快报的结构化输入)。"""
     c = df["close"].iloc[-1]
     f = df["factor"].iloc[-1]
@@ -59,8 +59,9 @@ def snapshot(df, params_ma=(60, 120, 240)) -> dict:
     s["pos_52w"] = round(float((c - lo250.min()) / (hi250.max() - lo250.min())), 3)
     s["volr"] = round(float(df["volume"].iloc[-1] / df["vma20"].iloc[-1]), 3)
     # —— LLM 增强字段:均线/轨道绝对值(现价口径,免反推)+ 指标 + 近10日量价序列 ——
-    for n in (20, 60, 120, 240):
-        s["mav%d" % n] = _r(df["ma%d" % n].iloc[-1] / f)
+    for n in (20, 60, 120, 250, 360):                        # 250/360 无预计算列,统一滚动现算
+        m = df["close"].rolling(n, min_periods=n).mean().iloc[-1]
+        s["mav%d" % n] = _r(m / f)
     s["kdj"] = [_r(df[x].iloc[-1], 1) for x in ("kdj_k", "kdj_d", "kdj_j")]
     s["macd"] = [_r(df[x].iloc[-1] / f, 3) for x in ("macd_dif", "macd_dea", "macd_hist")]
     s["rsi14"] = _r(df["rsi_14"].iloc[-1], 1)
@@ -86,7 +87,7 @@ def _market_scan(ind_dir=IND, bench="sh000300"):
         return _MKT_CACHE
     try:                                                       # 基准指数先行:定数据日
         b = pd.read_parquet(os.path.join(ind_dir, "%s.parquet" % bench),
-                            columns=["close", "ma240"])
+                            columns=["close"])
         d = str(b.index[-1])[:10]
     except Exception:
         b, d = None, None
@@ -97,7 +98,7 @@ def _market_scan(ind_dir=IND, bench="sh000300"):
             continue                                           # 指数/板块系列不计入个股统计
         try:
             df = pd.read_parquet(os.path.join(ind_dir, fn),
-                                 columns=["close", "ma240", "volume", "vma20"])
+                                 columns=["close", "volume", "vma20"])
         except Exception:
             continue
         if len(df) < 2 or (d and str(df.index[-1])[:10] != d):
@@ -109,7 +110,7 @@ def _market_scan(ind_dir=IND, bench="sh000300"):
             dec += 1
         else:
             flat += 1
-        m = df["ma240"].iloc[-1]
+        m = df["close"].rolling(250, min_periods=250).mean().iloc[-1]   # 年线=MA250,滚动现算
         if pd.notna(m):
             total += 1
             if last > m:
@@ -125,8 +126,9 @@ def _market_scan(ind_dir=IND, bench="sh000300"):
         c = b["close"].iloc[-1]
         st["bench_d5"] = float(c / b["close"].iloc[-6] - 1)
         st["bench_d20"] = float(c / b["close"].iloc[-21] - 1)
-        if pd.notna(b["ma240"].iloc[-1]):
-            st["bench_dist240"] = float(c / b["ma240"].iloc[-1] - 1)
+        m = b["close"].rolling(250, min_periods=250).mean().iloc[-1]
+        if pd.notna(m):
+            st["bench_dist250"] = float(c / m - 1)
     _MKT_CACHE.update(st)
     return st
 
@@ -137,14 +139,14 @@ def market_context(ind_dir=IND):
     parts = []
     if st["total"]:
         parts.append("涨%d/跌%d/平%d" % (st["adv"], st["dec"], st["flat"]))
-        parts.append("站上年线(MA240) %d/%d 只(%.0f%%)"
+        parts.append("站上年线(MA250) %d/%d 只(%.0f%%)"
                      % (st["above"], st["total"], 100.0 * st["above"] / st["total"]))
     if st["med_vr"] is not None:
         parts.append("中位量比%.2f" % st["med_vr"])
     if "bench_d5" in st:
         txt = "沪深300 近5日%+.1f%% 近20日%+.1f%%" % (100 * st["bench_d5"], 100 * st["bench_d20"])
-        if "bench_dist240" in st:
-            txt += " 距年线%+.1f%%" % (100 * st["bench_dist240"])
+        if "bench_dist250" in st:
+            txt += " 距年线%+.1f%%" % (100 * st["bench_dist250"])
         parts.append(txt)
     if not parts:
         return "大盘环境:统计不可用"
@@ -218,7 +220,7 @@ def format_report(events, tracking=None, briefs=None) -> str:
         lines.append("数据日 %s" % events[0]["date"])
     for e in order:
         ma = " ".join("MA%d %+.1f%%" % (n, 100 * e["dist_ma%d" % n])
-                      for n in (60, 120, 240) if e.get("dist_ma%d" % n) is not None)
+                      for n in (120, 250, 360) if e.get("dist_ma%d" % n) is not None)
         thesis = "\n> thesis:%s" % e["thesis"] if e.get("thesis") else ""
         lines.append("\n**%s %s** 触发[%s]\n> 现价 %.2f | %s | 距52周高 %.1f%% 位置%.0f%% | 量比%.2f%s" % (
             e["code"], e["name"], "+".join(rules_by[e["code"]]), e["close"], ma,
@@ -253,7 +255,7 @@ def _stock_facts(e, rules_str):
     """单票 → 多行结构化事实块(现价口径绝对值,LLM 直接引用免反推)。"""
     ma = " ".join("MA%d=%s(%+.1f%%)" % (n, _f(e.get("mav%d" % n)),
                                         100 * (e["close"] / e["mav%d" % n] - 1))
-                  for n in (20, 60, 120, 240) if e.get("mav%d" % n))
+                  for n in (20, 60, 120, 250, 360) if e.get("mav%d" % n))
     k, d, j = e.get("kdj") or (None, None, None)
     dif, dea, hist = e.get("macd") or (None, None, None)
     up, mid, low = e.get("boll") or (None, None, None)

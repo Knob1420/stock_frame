@@ -6,11 +6,11 @@ defaults:
     - rule: weekly_b1
       params: {no_good: true}
     - rule: near_ma
-      params: {period: 60, tolerance: 0.02}
-    - rule: near_ma
       params: {period: 120, tolerance: 0.02}
     - rule: near_ma
-      params: {period: 240, tolerance: 0.02}
+      params: {period: 250, tolerance: 0.02}
+    - rule: near_ma
+      params: {period: 360, tolerance: 0.02}
 
 watchlist:
   - code: "sh603690"

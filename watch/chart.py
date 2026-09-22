@@ -24,7 +24,7 @@ plt.rcParams["axes.unicode_minus"] = False
 
 SURFACE, INK, MUTED, GRID, BASE = "#fcfcfb", "#0b0b0b", "#898781", "#e1e0d9", "#c3c2b7"
 UP, DOWN = "#d03b3b", "#008300"          # A 股惯例:红涨(空心)/绿跌(实心)
-MA_C = {20: "#2a78d6", 60: "#eb6834", 240: "#4a3aa7"}   # 蓝/橙/紫,固定顺序
+MA_C = {20: "#2a78d6", 120: "#eb6834", 250: "#4a3aa7"}  # 蓝/橙/紫,固定顺序
 BOLL_FILL = "#cde2fb"
 PAD_R = 9                                # 右缘直标预留区(K线数)
 
@@ -63,9 +63,10 @@ def _edge_labels(ax, items, x_right, min_px=12):
 
 def stock_chart(df, code, name, rules, close, out_path, days=120):
     """个股:K线+MA+BOLL / 量 / KDJ 三联图 → PNG(约120交易日,现价口径)。"""
+    df = df.assign(ma250=df["close"].rolling(250, min_periods=250).mean())  # 年线滚动现算
     d = df.iloc[-days:].copy()
     f = df["factor"].iloc[-1]
-    for c in ("open", "high", "low", "close", "ma20", "ma60", "ma240",
+    for c in ("open", "high", "low", "close", "ma20", "ma120", "ma250",
               "boll_upper", "boll_lower"):
         d[c] = d[c] / f
     up = d["close"] >= d["open"]
@@ -136,10 +137,11 @@ def stock_chart(df, code, name, rules, close, out_path, days=120):
 
 def market_chart(bench_df, stats, out_path, days=250):
     """大盘总览:沪深300 走势+年线 / 当日宽度两条百分比堆叠条 → PNG。"""
-    d = bench_df.iloc[-days:]
+    d = bench_df.assign(
+        ma250=bench_df["close"].rolling(250, min_periods=250).mean()).iloc[-days:]
     x = range(len(d))
     dates = list(d.index)
-    c, m = d["close"], d["ma240"]
+    c, m = d["close"], d["ma250"]
 
     fig, (a1, a2) = plt.subplots(
         2, 1, figsize=(9.5, 5.6), dpi=120,
@@ -147,7 +149,7 @@ def market_chart(bench_df, stats, out_path, days=250):
     _style(a1), _style(a2)
 
     a1.plot(x, c, color="#2a78d6", linewidth=1.8, label="沪深300")
-    a1.plot(x, m, color="#eb6834", linewidth=1.4, label="MA240(年线)")
+    a1.plot(x, m, color="#eb6834", linewidth=1.4, label="MA250(年线)")
     a1.fill_between(x, c, m, where=(c >= m), color=UP, alpha=0.08, linewidth=0)
     a1.fill_between(x, c, m, where=(c < m), color=DOWN, alpha=0.08, linewidth=0)
     a1.legend(loc="upper left", fontsize=9, frameon=False)
@@ -155,8 +157,8 @@ def market_chart(bench_df, stats, out_path, days=250):
                  loc="left", pad=10)
     sub = "沪深300 近5日%+.1f%% 近20日%+.1f%%" % (100 * stats["bench_d5"],
                                                  100 * stats["bench_d20"])
-    if "bench_dist240" in stats:                      # 指数为归一化值,只展示相对涨跌
-        sub += " 距年线%+.1f%%" % (100 * stats["bench_dist240"])
+    if "bench_dist250" in stats:                      # 指数为归一化值,只展示相对涨跌
+        sub += " 距年线%+.1f%%" % (100 * stats["bench_dist250"])
     a1.text(0, 1.02, sub, transform=a1.transAxes, fontsize=9, color="#52514e")
     _xlabels(a1, dates)
 
