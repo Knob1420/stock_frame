@@ -411,10 +411,16 @@ if __name__ == "__main__":
             import time as _t
 
             def _send(payload):
-                urllib.request.urlopen(urllib.request.Request(
+                req = urllib.request.Request(
                     hook, data=json.dumps(payload).encode(),
-                    headers={"Content-Type": "application/json"}), timeout=10)
-                _t.sleep(3.1)                          # 企微机器人限 20 条/分钟
+                    headers={"Content-Type": "application/json"})
+                body = json.loads(urllib.request.urlopen(req, timeout=10).read().decode() or "{}")
+                if body.get("errcode") == 45009:       # 触发限速:退避后重试一次
+                    _t.sleep(12)
+                    body = json.loads(urllib.request.urlopen(req, timeout=10).read().decode() or "{}")
+                if body.get("errcode"):                # 企微 200 也可能拒绝,必须看 body
+                    print("⚠ 企微拒绝: %s %s" % (body.get("errcode"), body.get("errmsg")))
+                _t.sleep(3.3)                          # 限 20 条/分钟,留余量
 
             def _img(p):
                 b = open(p, "rb").read()
