@@ -136,3 +136,22 @@ def test_cards_from_archive_arrays(tmp_path):
               date="2026-09-21", out_dir=str(tmp_path))
     html = open(p, encoding="utf-8").read()
     assert "sh600519 贵州茅台" in html and "18/22/6" in html
+
+
+def test_rebuild_briefs_flat_text(tmp_path):
+    """重建入口:briefs JSON(嵌套)须拍平为 {code: 六段文本} 喂卡片,dict 不能进 .strip()。"""
+    import json
+    from report_html import _load_brief_text
+    bd = tmp_path / "briefs"
+    bd.mkdir()
+    json.dump({"date": "2026-09-22", "briefs": {"sh600519": {
+        "rules": "b1", "close": 1420.0, "thesis": "",
+        "brief": "①支撑\n②压力\n③量价\n④位置\n⑤符合低吸前置状态\n⑥风险"}}},
+        open(bd / "2026-09-22.json", "w", encoding="utf-8"), ensure_ascii=False)
+    flat = _load_brief_text("2026-09-22", str(tmp_path))
+    assert flat == {"sh600519": "①支撑\n②压力\n③量价\n④位置\n⑤符合低吸前置状态\n⑥风险"}
+    ev = [_ev("sh600519", "贵州茅台")]
+    p = build(events=ev, tracking=[], briefs=flat, charts={}, market=MARKET,
+              date="2026-09-22", out_dir=str(tmp_path))
+    html = open(p, encoding="utf-8").read()
+    assert "判定:⑤符合低吸前置状态" in html          # 卡头结论来自扁平文本

@@ -141,6 +141,11 @@ def _load_brief(date, out_dir):
         return {}
 
 
+def _load_brief_text(date, out_dir):
+    """同上但拍平为 {code: 六段文本}——卡片渲染消费的格式(重建入口用)。"""
+    return {k: v.get("brief", "") for k, v in _load_brief(date, out_dir).items()}
+
+
 def _cls(x):
     """涨红跌绿(A股惯例)class;None → 空。"""
     return "" if _nan(x) else ("pos" if x > 0 else "neg" if x < 0 else "")
@@ -326,7 +331,7 @@ if __name__ == "__main__":
         events = arc[arc["date"].astype(str) == d].to_dict("records")
     briefs = {}
     try:
-        briefs = _load_brief(d, REPORTS)
+        briefs = _load_brief_text(d, REPORTS)
     except Exception:
         pass
     charts = {"market": os.path.join(REPORTS, "charts", d, "market.png")}
