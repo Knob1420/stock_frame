@@ -394,8 +394,10 @@ if __name__ == "__main__":
     report_txt = format_report(events, tracking, briefs)
     if html_path:
         base = os.environ.get("REPORT_BASE_URL", "").rstrip("/")   # 配了静态托管则推可点URL
-        detail = "%s/%s.html" % (base, date) if base else "watch/reports/%s.html" % date
-        report_txt += "\n\n📄 当日详情: %s" % detail
+        if base:                                                   # 企微markdown裸URL不可点,须链接语法
+            report_txt += "\n\n[📄 当日详情: %s 盯盘日报](%s/%s.html)" % (date, base, date)
+        else:
+            report_txt += "\n\n📄 当日详情: watch/reports/%s.html" % date
     print(report_txt)
     if a.llm and events:                                    # 落盘完整版md + 快报JSON
         rd = os.path.join(HERE, "reports")
