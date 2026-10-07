@@ -10,7 +10,9 @@ pool/pool.json.tmp
 pool/reports/
 pool/lookup_tables/
 .env
-research/out/
+research/out/*
+!research/out/b1_shape_lab_v1/
+!research/out/b1_shape_reverse_v1/
 .claude/logs/
 watch/state.json
 watch/archive.parquet
