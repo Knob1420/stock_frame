@@ -553,3 +553,17 @@ python -m pytest watch/tests/test_watch.py research/tests/test_b1_revalidation.p
 - 模型解释是否帮助用户更快做出一致判断。
 
 只有前三名相对候补在新增数据中持续出现扣成本后的收益或风险增量，才有理由把提醒分升级为择股分数。在此之前，它只负责控制消息优先级。
+
+## 2026-10-07 双线整合（watch-integrate）
+
+本机重构线与另一服务器的 HTML 日报线（origin/main 210de16..9663bce）为同源分叉，
+git 无法自动合并。整合策略：以本重构线为底座，移植远端四个新模块并嫁接集成点。
+
+- 原样移植：`backfill.py`（前向收益回填）、`chart.py`（大盘/个股配图）、
+  `report_html.py`（HTML 日报）、`serve_reports.py`（公网托管）及其测试
+  （`tests/test_backfill.py`、`tests/test_report_html.py`、`conftest.py`、`util.py`）。
+- scan.py 嫁接：`_market_scan`（全市场宽度+基准统计）、`save_briefs`（解读 JSON 落盘）、
+  `_tracking_from_state`（v2 状态→跟踪区）、`_build_charts`/`_build_html`（配图与日报，
+  含同日覆盖保护）、`push_report` 升级为企微 errcode 校验+限速退避+图片分块推送。
+- watchlist.yaml：保留重构线规则调优，并入远端新增 4 只票（冰轮环境/东材科技/云南锗业/东方锆业）。
+- 验证：`pytest watch/tests` 25 项全过；`scan.py --preview` 全链路冒烟正常（2026-09-30 数据日）。

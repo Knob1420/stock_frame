@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import re
+import statistics
 import sys
 import urllib.parse
 import urllib.request
@@ -885,28 +886,196 @@ def _split_markdown(text, max_bytes=3500):
     return chunks
 
 
-def push_report(report, result):
+_MKT_CACHE = {}
+BRIEFS_DIR = HERE / "reports" / "briefs"
+
+
+def _market_scan(ind_dir=IND, bench="sh000300"):
+    """全市场宽度统计 + 基准指数 → dict(模块级缓存;LLM 文本与大盘图共用)。
+
+    自建指标库全量扫描:涨跌家数、站上年线比例、中位量比 + 沪深300 近期
+    涨跌/距年线。数据日取个股多数派末行日期(基准指数可能滞后个股一天)。
+    任何一步失败都降级而非中断。
+    """
+    if _MKT_CACHE:
+        return _MKT_CACHE
+    try:
+        b = pd.read_parquet(os.path.join(ind_dir, "%s.parquet" % bench),
+                            columns=["close"])
+        bench_df = b.copy()
+        bench_df.index = pd.DatetimeIndex(bench_df.index)
+    except Exception:
+        b = None
+        bench_df = None
+    rows = []
+    for fn in sorted(os.listdir(ind_dir)):
+        if not fn.endswith(".parquet") or fn[:-8].startswith(("sh000", "sz39")):
+            continue
+        try:
+            df = pd.read_parquet(os.path.join(ind_dir, fn),
+                                 columns=["close", "volume", "vma20"])
+        except Exception:
+            continue
+        if len(df) < 2:
+            continue
+        end = str(df.index[-1])[:10]
+        last, prev = df["close"].iloc[-1], df["close"].iloc[-2]
+        chg = 1 if last > prev else (-1 if last < prev else 0)
+        m = df["close"].rolling(250, min_periods=250).mean().iloc[-1]
+        vm = df["vma20"].iloc[-1] if "vma20" in df else None
+        rows.append((end, chg, None if pd.isna(m) else bool(last > m),
+                     None if vm is None or pd.isna(vm) or vm <= 0
+                     else float(df["volume"].iloc[-1] / vm)))
+    d = statistics.mode(r[0] for r in rows) if rows else "?"
+    pick = [r for r in rows if r[0] == d]
+    adv = sum(1 for r in pick if r[1] == 1)
+    dec = sum(1 for r in pick if r[1] == -1)
+    ma_ok = [r for r in pick if r[2] is not None]
+    vrs = sorted(r[3] for r in pick if r[3] is not None)
+    st = {"date": d, "advance": adv, "decline": dec,
+          "flat": len(pick) - adv - dec, "total": len(pick),
+          "above_ma250_pct": round(100 * sum(r[2] for r in ma_ok) / len(ma_ok), 1) if ma_ok else None,
+          "median_vol_ratio": round(vrs[len(vrs) // 2], 2) if vrs else None,
+          "bench_df": bench_df}
+    if b is not None and len(b) > 21:
+        c = b["close"].iloc[-1]
+        st.update({
+            "bench_ret1": _number(c / b["close"].iloc[-2] - 1, 4),
+            "bench_ret5": _number(c / b["close"].iloc[-6] - 1, 4),
+            "bench_ret20": _number(c / b["close"].iloc[-21] - 1, 4),
+        })
+        ma250 = b["close"].rolling(250, min_periods=250).mean().iloc[-1]
+        if pd.notna(ma250):
+            st["bench_ma250_dist"] = _number(c / ma250 - 1, 4)
+    _MKT_CACHE.update(st)
+    return st
+
+
+def save_briefs(date, briefs, events, out_dir=None):
+    """LLM 六段解读结构化落盘;重复运行同日覆盖(幂等)。"""
+    if not briefs:
+        return None
+    d = Path(out_dir) if out_dir else BRIEFS_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    first, merged = {}, {}
+    for e in events:
+        first.setdefault(e["code"], e)
+        merged[e["code"]] = (merged[e["code"]] + "+" + e.get("rule", "")
+                             if e["code"] in merged else e.get("rule", ""))
+    payload = {"date": date, "briefs": {
+        code: {"rules": merged.get(code, ""), "close": first[code].get("close"),
+               "thesis": first[code].get("thesis", ""), "brief": txt}
+        for code, txt in briefs.items()}}
+    p = d / ("%s.json" % date)
+    p.write_text(json.dumps(payload, ensure_ascii=False, indent=1),
+                 encoding="utf-8")
+    return str(p)
+
+
+def _tracking_from_state(state, config):
+    """跟踪区数据:当前仍活跃且已持续≥1天的规则(v2 状态结构)。"""
+    names = {it.get("code"): it.get("name", "")
+             for it in config.get("watchlist", [])}
+    today = pd.Timestamp.today()
+    out = []
+    for key, rec in (state.get("rules") or {}).items():
+        if not rec.get("active") or not rec.get("since"):
+            continue
+        days = (today - pd.Timestamp(rec["since"])).days
+        if days <= 0:
+            continue
+        code, _, rule = key.partition("|")
+        out.append({"code": code, "name": names.get(code, ""),
+                    "rule": rule or "", "days": days})
+    return out
+
+
+def _build_charts(events, st, date):
+    """大盘图无条件生成;每票一张(单图失败不阻断)。返回 {key: png路径}。"""
+    charts = {}
+    cdir = HERE / "reports" / "charts" / str(date)
+    cdir.mkdir(parents=True, exist_ok=True)
+    if st.get("bench_df") is not None:
+        try:
+            import chart as _chart
+            charts["market"] = _chart.market_chart(
+                st["bench_df"], st, str(cdir / "market.png"))
+        except Exception as ex:
+            print("⚠ 大盘图失败: %s" % ex)
+    first, merged = {}, {}
+    for e in events:
+        first.setdefault(e["code"], e)
+        merged[e["code"]] = (merged[e["code"]] + "+" + e.get("rule", "")
+                             if e["code"] in merged else e.get("rule", ""))
+    for code, e in first.items():
+        try:
+            df = pd.read_parquet(Path(IND) / ("%s.parquet" % code))
+            df.index = pd.DatetimeIndex(df.index)
+            import chart as _chart
+            charts[code] = _chart.stock_chart(
+                df, code, e.get("name", ""), merged[code], e.get("close"),
+                str(cdir / ("%s.png" % code)))
+        except Exception as ex:
+            print("⚠ %s 配图失败: %s" % (code, ex))
+    return charts
+
+
+def _build_html(events, tracking, briefs, charts, st, date):
+    """HTML 日报(无事件也生成,失败不阻断)。覆盖保护:当日完整版已存在且
+    本次无新事件(状态已消费的重复运行)则不覆盖;完整重建用 python report_html.py <date>。"""
+    html_p = HERE / "reports" / ("%s.html" % date)
+    try:
+        import report_html
+        if events or not html_p.exists():
+            return report_html.build(events, tracking, briefs, charts, st, date)
+        return str(html_p)
+    except Exception as ex:
+        print("⚠ HTML日报失败: %s" % ex)
+        return None
+
+
+def push_report(report, result, charts=None):
+    charts = charts or {}
     hook = os.environ.get("WATCH_WEBHOOK", "")
     serverchan = os.environ.get("SERVERCHAN_KEY", "")
+
+    def _send(payload):
+        req = urllib.request.Request(
+            hook, data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"})
+        body = json.loads(urllib.request.urlopen(req, timeout=10).read().decode() or "{}")
+        if body.get("errcode") == 45009:       # 触发限速:退避后重试一次
+            import time as _t
+            _t.sleep(12)
+            body = json.loads(urllib.request.urlopen(req, timeout=10).read().decode() or "{}")
+        if body.get("errcode"):                # 企微 200 也可能拒绝,必须看 body
+            print("⚠ 企微拒绝: %s %s" % (body.get("errcode"), body.get("errmsg")))
+        import time as _t
+        _t.sleep(3.3)                          # 限 20 条/分钟,留余量
+
+    def _img(p):
+        import base64
+        import hashlib
+        b = open(p, "rb").read()
+        return {"msgtype": "image",
+                "image": {"base64": base64.b64encode(b).decode(),
+                          "md5": hashlib.md5(b).hexdigest()}}
+
     if hook:
-        chunks = _split_markdown(report)
-        for chunk in chunks:
-            data = json.dumps({
-                "msgtype": "markdown",
-                "markdown": {"content": chunk},
-            }).encode()
-            urllib.request.urlopen(
-                urllib.request.Request(
-                    hook,
-                    data=data,
-                    headers={"Content-Type": "application/json"},
-                ),
-                timeout=10,
-            )
-        print(
-            "已推送企微 %d 条（%d 只股票）"
-            % (len(chunks), len(result["events"]))
-        )
+        n_img = 0
+        blocks = [b.strip() for b in report.split("\n\n") if b.strip()]
+        for i, blk in enumerate(blocks):        # 企微 markdown 上限 4096 字节
+            for j in range(0, len(blk.encode()), 3800):
+                _send({"msgtype": "markdown",
+                       "markdown": {"content": blk.encode()[j:j + 3800].decode("utf-8", "ignore")}})
+            if i == 0 and "market" in charts:   # 头部块后跟大盘总览图
+                _send(_img(charts["market"]))
+                n_img += 1
+            m = re.match(r"\*\*(sh\d{6}|sz\d{6}|bj\d{6})", blk)
+            if m and m.group(1) in charts:      # 各票文字块后跟该票图
+                _send(_img(charts[m.group(1)]))
+                n_img += 1
+        print("已推送企微: %d 个文本块 + %d 张图" % (len(blocks), n_img))
     elif serverchan:
         body = urllib.parse.urlencode({
             "title": "盘后观察：%d只（%s）"
@@ -943,6 +1112,7 @@ def main(argv=None):
         help="首次建状态时也提醒；默认静默建基线",
     )
     args = parser.parse_args(argv)
+    import yaml
     result = run(
         preview=args.preview,
         persist=not args.preview,
@@ -952,19 +1122,37 @@ def main(argv=None):
     briefs = (
         llm_brief(result["events"], max_llm) if args.llm else {}
     )
+    st = _market_scan()
+    date = result.get("date")
+    if not date or date == "?":
+        date = str(pd.Timestamp.today().date())
+    charts = {} if args.preview else _build_charts(result["events"], st, date)
+    tracking = _tracking_from_state(
+        _load_state(STATE_F)[0],
+        yaml.safe_load(Path(CONFIG_F).read_text(encoding="utf-8")) or {})
+    html_path = None if args.preview else _build_html(
+        result["events"], tracking, briefs, charts, st, date)
     report = format_report(result, briefs)
+    if html_path:
+        base = os.environ.get("REPORT_BASE_URL", "").rstrip("/")
+        if base:                                # 企微 markdown 裸 URL 不可点,须链接语法
+            report += "\n\n[📄 当日详情: %s 盯盘日报](%s/%s.html)" % (date, base, date)
+        else:
+            report += "\n\n📄 当日详情: watch/reports/%s.html" % date
     print(report)
     for error in result["errors"]:
         print("⚠ %s" % error, file=sys.stderr)
 
-    if result["events"] and not args.preview:
+    if not args.preview:
         reports = HERE / "reports"
         reports.mkdir(exist_ok=True)
-        (reports / (result["date"] + ".md")).write_text(
-            report, encoding="utf-8"
-        )
+        if result["events"]:
+            (reports / (result["date"] + ".md")).write_text(
+                report, encoding="utf-8"
+            )
+        save_briefs(date, briefs, result["events"])
     if args.push and result["events"] and not args.preview:
-        push_report(report, result)
+        push_report(report, result, charts)
     elif args.push and args.preview:
         print("preview 模式不会推送")
     return 0

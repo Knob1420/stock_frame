@@ -337,3 +337,11 @@ watchlist:
         params: {lower: 1300, upper: 1450}
       - rule: box_breakdown
         params: {lower: 1300}
+  - code: "sz000811"
+    name: 冰轮环境
+  - code: "sh601208"
+    name: 东材科技
+  - code: "sz002428"
+    name: 云南锗业
+  - code: "sz002167"
+    name: 东方锆业
