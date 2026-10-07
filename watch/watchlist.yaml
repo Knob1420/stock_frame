@@ -1,16 +1,28 @@
-# defaults 对每只票生效(票型无关);单票 rules 为追加(箱体等需人工知识的规则)
+# 默认规则先形成“状态”，只有组合得分达标或出现重点信号才提醒。
+# 同一股票 10 个交易日内默认不重复提醒；风险信号和明显升级可穿透冷却。
 defaults:
+  alerting:
+    min_score: 4
+    min_categories: 2
+    cooldown_bars: 10
+    cooldown_override_score: 2
+    max_push_stocks: 3
+    llm_max_stocks: 3
   rules:
     - rule: b1
-      params: {no_good: true}    # 盯盘口径:仅 J≤15
+      params: {no_good: false}   # 原始B1完整条件；不再把所有 J≤15 都当提醒
+    - rule: b1_hook
+      params: {threshold: 15, require_good: true}
     - rule: weekly_b1
-      params: {no_good: true}
+      params: {no_good: false}
     - rule: near_ma
-      params: {period: 60, tolerance: 0.02}
+      params: {period: 60, tolerance: 0.015}
     - rule: near_ma
-      params: {period: 120, tolerance: 0.02}
+      params: {period: 120, tolerance: 0.015}
     - rule: near_ma
-      params: {period: 240, tolerance: 0.02}
+      params: {period: 240, tolerance: 0.015}
+    - rule: volume_dry_up
+      params: {ratio: 0.75}       # 当日量不高于20日均量的75%
 
 watchlist:
   - code: "sh603690"
@@ -318,6 +330,10 @@ watchlist:
     name: 生益科技
   - code: "sh600519"
     name: 贵州茅台
+    priority: high
+    thesis: 箱体下沿观察，守住后等待止跌确认
     rules:
       - rule: box_touch_lower
         params: {lower: 1300, upper: 1450}
+      - rule: box_breakdown
+        params: {lower: 1300}
