@@ -1,0 +1,326 @@
+{
+  "format_version": 3,
+  "extracted_at": "2026-10-06T14:13:02.971701+08:00",
+  "instrument": "Z_SK0AMV",
+  "sources": {
+    "day_vdat": {
+      "path": "E:\\Compass\\WavMain\\ANALYSE\\Data\\ChinaStk\\Z_SK\\day.vdat",
+      "size": 7427118,
+      "mtime": "2026-10-06T11:14:52.408814+08:00",
+      "sha256": "3dd49f97c1ff0823609051b3a4d1e8bf91a63aa47e49ad61a6c335967f25c146"
+    }
+  },
+  "day_vdat": {
+    "status": "parsed",
+    "candidate_header_occurrences": 35,
+    "data_pages": [
+      {
+        "offset": 6722334,
+        "rows": 250,
+        "first_date": "1993-01-03",
+        "last_date": "1993-12-21"
+      },
+      {
+        "offset": 6729382,
+        "rows": 250,
+        "first_date": "1993-12-22",
+        "last_date": "1994-12-16"
+      },
+      {
+        "offset": 6736430,
+        "rows": 250,
+        "first_date": "1994-12-19",
+        "last_date": "1995-12-14"
+      },
+      {
+        "offset": 6743478,
+        "rows": 250,
+        "first_date": "1995-12-15",
+        "last_date": "1996-12-19"
+      },
+      {
+        "offset": 6750526,
+        "rows": 250,
+        "first_date": "1996-12-20",
+        "last_date": "1997-12-30"
+      },
+      {
+        "offset": 6757574,
+        "rows": 250,
+        "first_date": "1997-12-31",
+        "last_date": "1999-01-06"
+      },
+      {
+        "offset": 6764622,
+        "rows": 250,
+        "first_date": "1999-01-07",
+        "last_date": "2000-01-21"
+      },
+      {
+        "offset": 6771670,
+        "rows": 250,
+        "first_date": "2000-01-24",
+        "last_date": "2001-02-19"
+      },
+      {
+        "offset": 6778718,
+        "rows": 250,
+        "first_date": "2001-02-20",
+        "last_date": "2002-03-07"
+      },
+      {
+        "offset": 6785766,
+        "rows": 250,
+        "first_date": "2002-03-08",
+        "last_date": "2003-03-19"
+      },
+      {
+        "offset": 6792814,
+        "rows": 250,
+        "first_date": "2003-03-20",
+        "last_date": "2004-04-01"
+      },
+      {
+        "offset": 6799862,
+        "rows": 250,
+        "first_date": "2004-04-02",
+        "last_date": "2005-04-12"
+      },
+      {
+        "offset": 6806910,
+        "rows": 250,
+        "first_date": "2005-04-13",
+        "last_date": "2006-04-24"
+      },
+      {
+        "offset": 6813958,
+        "rows": 250,
+        "first_date": "2006-04-25",
+        "last_date": "2007-05-10"
+      },
+      {
+        "offset": 6821006,
+        "rows": 250,
+        "first_date": "2007-05-11",
+        "last_date": "2008-05-15"
+      },
+      {
+        "offset": 6828054,
+        "rows": 250,
+        "first_date": "2008-05-16",
+        "last_date": "2009-05-22"
+      },
+      {
+        "offset": 6835102,
+        "rows": 250,
+        "first_date": "2009-05-25",
+        "last_date": "2010-05-31"
+      },
+      {
+        "offset": 6842150,
+        "rows": 250,
+        "first_date": "2010-06-01",
+        "last_date": "2011-06-14"
+      },
+      {
+        "offset": 6849198,
+        "rows": 250,
+        "first_date": "2011-06-15",
+        "last_date": "2012-06-25"
+      },
+      {
+        "offset": 6856246,
+        "rows": 250,
+        "first_date": "2012-06-26",
+        "last_date": "2013-07-09"
+      },
+      {
+        "offset": 6863294,
+        "rows": 250,
+        "first_date": "2013-07-10",
+        "last_date": "2014-07-17"
+      },
+      {
+        "offset": 6870342,
+        "rows": 250,
+        "first_date": "2014-07-18",
+        "last_date": "2015-07-24"
+      },
+      {
+        "offset": 6877390,
+        "rows": 250,
+        "first_date": "2015-07-27",
+        "last_date": "2016-08-02"
+      },
+      {
+        "offset": 6884438,
+        "rows": 250,
+        "first_date": "2016-08-03",
+        "last_date": "2017-08-11"
+      },
+      {
+        "offset": 6891486,
+        "rows": 250,
+        "first_date": "2017-08-14",
+        "last_date": "2018-08-20"
+      },
+      {
+        "offset": 6898534,
+        "rows": 250,
+        "first_date": "2018-08-21",
+        "last_date": "2019-08-29"
+      },
+      {
+        "offset": 6905582,
+        "rows": 250,
+        "first_date": "2019-08-30",
+        "last_date": "2020-09-09"
+      },
+      {
+        "offset": 6912630,
+        "rows": 250,
+        "first_date": "2020-09-10",
+        "last_date": "2021-09-17"
+      },
+      {
+        "offset": 6919678,
+        "rows": 250,
+        "first_date": "2021-09-22",
+        "last_date": "2022-09-30"
+      },
+      {
+        "offset": 6926726,
+        "rows": 250,
+        "first_date": "2022-10-10",
+        "last_date": "2023-10-18"
+      },
+      {
+        "offset": 6933774,
+        "rows": 250,
+        "first_date": "2023-10-19",
+        "last_date": "2024-10-30"
+      },
+      {
+        "offset": 6940822,
+        "rows": 250,
+        "first_date": "2024-10-31",
+        "last_date": "2025-11-10"
+      },
+      {
+        "offset": 6947870,
+        "rows": 218,
+        "first_date": "2025-11-11",
+        "last_date": "2026-09-30"
+      }
+    ],
+    "data_page_count": 33,
+    "rows": 8218,
+    "first_date": "1993-01-03",
+    "last_date": "2026-09-30",
+    "zero_amount_rows": 33
+  },
+  "cde": {
+    "status": "not_available"
+  },
+  "result": {
+    "rows": 8218,
+    "research_rows": 8217,
+    "first_date": "1993-01-03",
+    "last_date": "2026-09-30",
+    "duplicate_dates": 0,
+    "weekend_dates": [
+      "1993-01-03"
+    ],
+    "long_gaps_over_10_calendar_days": [
+      {
+        "previous": "1996-02-16",
+        "current": "1996-03-04",
+        "calendar_days": 17
+      },
+      {
+        "previous": "1997-01-31",
+        "current": "1997-02-17",
+        "calendar_days": 17
+      },
+      {
+        "previous": "1998-01-23",
+        "current": "1998-02-09",
+        "calendar_days": 17
+      },
+      {
+        "previous": "1999-02-09",
+        "current": "1999-03-01",
+        "calendar_days": 20
+      },
+      {
+        "previous": "2000-01-28",
+        "current": "2000-02-14",
+        "calendar_days": 17
+      },
+      {
+        "previous": "2001-01-19",
+        "current": "2001-02-05",
+        "calendar_days": 17
+      },
+      {
+        "previous": "2002-02-08",
+        "current": "2002-02-25",
+        "calendar_days": 17
+      },
+      {
+        "previous": "2002-09-27",
+        "current": "2002-10-08",
+        "calendar_days": 11
+      },
+      {
+        "previous": "2003-01-29",
+        "current": "2003-02-10",
+        "calendar_days": 12
+      },
+      {
+        "previous": "2003-04-30",
+        "current": "2003-05-12",
+        "calendar_days": 12
+      },
+      {
+        "previous": "2004-01-16",
+        "current": "2004-01-29",
+        "calendar_days": 13
+      },
+      {
+        "previous": "2005-02-04",
+        "current": "2005-02-16",
+        "calendar_days": 12
+      },
+      {
+        "previous": "2006-01-25",
+        "current": "2006-02-06",
+        "calendar_days": 12
+      },
+      {
+        "previous": "2020-01-23",
+        "current": "2020-02-03",
+        "calendar_days": 11
+      },
+      {
+        "previous": "2023-09-28",
+        "current": "2023-10-09",
+        "calendar_days": 11
+      },
+      {
+        "previous": "2024-02-08",
+        "current": "2024-02-19",
+        "calendar_days": 11
+      },
+      {
+        "previous": "2026-02-13",
+        "current": "2026-02-24",
+        "calendar_days": 11
+      }
+    ],
+    "invalid_volume_rows": 0,
+    "invalid_amount_rows": 33,
+    "zero_amount_rows": 33
+  },
+  "output_dir": "E:\\quant\\compass-0amv-extractor\\output"
+}
