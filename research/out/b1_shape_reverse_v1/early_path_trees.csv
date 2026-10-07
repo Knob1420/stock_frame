@@ -1,0 +1,133 @@
+contrast,known_at,test_auc,test_n,rules
+good_vs_bad,T+1,0.5255689307813461,28876,"|--- ret_now <= 0.02041
+|   |--- up_fraction <= 0.50000
+|   |   |--- class: True
+|   |--- up_fraction >  0.50000
+|   |   |--- class: False
+|--- ret_now >  0.02041
+|   |--- last_change <= 0.03464
+|   |   |--- class: True
+|   |--- last_change >  0.03464
+|   |   |--- class: True
+"
+good_vs_bad,T+2,0.6503372088263154,28876,"|--- bounce_from_low <= 0.00431
+|   |--- fade_from_high <= -0.02087
+|   |   |--- class: False
+|   |--- fade_from_high >  -0.02087
+|   |   |--- class: False
+|--- bounce_from_low >  0.00431
+|   |--- bounce_from_low <= 0.02527
+|   |   |--- class: True
+|   |--- bounce_from_low >  0.02527
+|   |   |--- class: True
+"
+good_vs_bad,T+3,0.7277677581002444,28876,"|--- ret_now <= 0.00359
+|   |--- fade_from_high <= -0.01654
+|   |   |--- class: False
+|   |--- fade_from_high >  -0.01654
+|   |   |--- class: False
+|--- ret_now >  0.00359
+|   |--- bounce_from_low <= 0.02636
+|   |   |--- class: True
+|   |--- bounce_from_low >  0.02636
+|   |   |--- class: True
+"
+good_vs_bad,T+5,0.7866680140272393,28876,"|--- ret_now <= 0.00446
+|   |--- ret_now <= -0.01616
+|   |   |--- class: False
+|   |--- ret_now >  -0.01616
+|   |   |--- class: False
+|--- ret_now >  0.00446
+|   |--- bounce_from_low <= 0.05211
+|   |   |--- class: True
+|   |--- bounce_from_low >  0.05211
+|   |   |--- class: True
+"
+A1_vs_B,T+1,0.5503287557647897,14929,"|--- ret_now <= 0.01868
+|   |--- ret_now <= 0.00745
+|   |   |--- class: False
+|   |--- ret_now >  0.00745
+|   |   |--- class: False
+|--- ret_now >  0.01868
+|   |--- last_change <= 0.05324
+|   |   |--- class: True
+|   |--- last_change >  0.05324
+|   |   |--- class: True
+"
+A1_vs_B,T+2,0.6649614033645057,14929,"|--- ret_now <= 0.00411
+|   |--- ret_now <= -0.01926
+|   |   |--- class: False
+|   |--- ret_now >  -0.01926
+|   |   |--- class: False
+|--- ret_now >  0.00411
+|   |--- ret_now <= 0.03826
+|   |   |--- class: True
+|   |--- ret_now >  0.03826
+|   |   |--- class: True
+"
+A1_vs_B,T+3,0.7377716759159375,14929,"|--- ret_now <= 0.00307
+|   |--- min_so_far <= -0.01993
+|   |   |--- class: False
+|   |--- min_so_far >  -0.01993
+|   |   |--- class: False
+|--- ret_now >  0.00307
+|   |--- ret_now <= 0.02706
+|   |   |--- class: False
+|   |--- ret_now >  0.02706
+|   |   |--- class: True
+"
+A1_vs_B,T+5,0.8039254128990629,14929,"|--- ret_now <= 0.00263
+|   |--- min_so_far <= -0.01611
+|   |   |--- class: False
+|   |--- min_so_far >  -0.01611
+|   |   |--- class: False
+|--- ret_now >  0.00263
+|   |--- ret_now <= 0.03773
+|   |   |--- class: True
+|   |--- ret_now >  0.03773
+|   |   |--- class: True
+"
+C_vs_D1,T+1,0.5556986392821411,13947,"|--- ret_now <= -0.03092
+|   |--- ret_now <= -0.04026
+|   |   |--- class: False
+|   |--- ret_now >  -0.04026
+|   |   |--- class: False
+|--- ret_now >  -0.03092
+|   |--- last_change <= -0.00327
+|   |   |--- class: True
+|   |--- last_change >  -0.00327
+|   |   |--- class: True
+"
+C_vs_D1,T+2,0.654774425260009,13947,"|--- max_so_far <= 0.01082
+|   |--- ret_now <= -0.00772
+|   |   |--- class: False
+|   |--- ret_now >  -0.00772
+|   |   |--- class: True
+|--- max_so_far >  0.01082
+|   |--- ret_now <= 0.02166
+|   |   |--- class: True
+|   |--- ret_now >  0.02166
+|   |   |--- class: True
+"
+C_vs_D1,T+3,0.7250090452151039,13947,"|--- max_so_far <= 0.01575
+|   |--- ret_now <= -0.01329
+|   |   |--- class: False
+|   |--- ret_now >  -0.01329
+|   |   |--- class: True
+|--- max_so_far >  0.01575
+|   |--- max_so_far <= 0.02559
+|   |   |--- class: True
+|   |--- max_so_far >  0.02559
+|   |   |--- class: True
+"
+C_vs_D1,T+5,0.8029405343912251,13947,"|--- max_so_far <= 0.01580
+|   |--- ret_now <= -0.01739
+|   |   |--- class: False
+|   |--- ret_now >  -0.01739
+|   |   |--- class: True
+|--- max_so_far >  0.01580
+|   |--- max_so_far <= 0.02362
+|   |   |--- class: True
+|   |--- max_so_far >  0.02362
+|   |   |--- class: True
+"

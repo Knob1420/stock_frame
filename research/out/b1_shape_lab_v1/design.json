@@ -1,0 +1,25 @@
+{
+  "labels": "A1/A2/B/C/D1/D2 frozen path classes, entry=next open, closes only",
+  "universe": "AMV-allowed B1 events 2020+, 40-day buffer",
+  "features": 33,
+  "contrasts": [
+    "A1vsB",
+    "A1vsD1",
+    "CvsB",
+    "CvsD1",
+    "A1vsC",
+    "BvsD1"
+  ],
+  "auc": "Mann-Whitney P(x>y), pooled 2020-2026; year consistency reported",
+  "code_hashes": {
+    "b1_amv.py": "2e1e0867063dff15c249e5fd0d9211f394f3787987f2d49ad8c75b2c04159096",
+    "b1_amv_gate.py": "8eea024edcbc791d3896e95069cfc6960083d5164102f308ac2ff34b9cb1b155",
+    "b1_shape_lab.py": "01d8a4a069b450278e576912d0530ae29e457bfbd5b0609a34ea36bdf6a395dc"
+  },
+  "stage": "diagnostic_labels_not_trading_rules",
+  "limitations": [
+    "Ex-post labels; AUC>0.55 pooled AND 6/7 years consistent is the promising bar, still needs frozen out-of-sample confirmation.",
+    "Classes are correlated within days; no clustering correction.",
+    "Prior experiments 9/12 failed to convert similar signals into account edge; treat as hypothesis generation."
+  ]
+}

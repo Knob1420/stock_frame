@@ -1,0 +1,62 @@
+{
+  "status": "COMPLETED_PATH_MECHANISM_STUDY",
+  "universe": {
+    "signals": 57992,
+    "fillable_complete_labels": 57949,
+    "unfilled": 43,
+    "signal_start": "2020-01-02",
+    "signal_end": "2026-07-23",
+    "price_end": "2026-09-17",
+    "unfilled_by_year": {
+      "2020": 8,
+      "2021": 14,
+      "2022": 6,
+      "2023": 4,
+      "2024": 3,
+      "2025": 3,
+      "2026": 5
+    },
+    "unresolved_fixed15": 1
+  },
+  "unfilled_signals_excluded": 43,
+  "development": "2020-2022",
+  "frozen_test": "2023-2026",
+  "contrasts": [
+    "good_vs_bad",
+    "A1_vs_C",
+    "A1_vs_B",
+    "C_vs_D1",
+    "B_vs_D1"
+  ],
+  "features_scanned": 63,
+  "source": {
+    "schema": 1,
+    "fingerprint": "fe127568157f6b4b95e540fd917868b6fc1330c9419db0291686c906be08b4db",
+    "asof": "2026-09-17",
+    "symbols": 3484,
+    "pools": {
+      "b1": 289560,
+      "pocket_core": 250169,
+      "pocket_current": 33988
+    },
+    "elapsed_seconds": 236.9115023938939,
+    "scope": "mainboard prices; current pocket RPS ranked against all locally available A shares; no external API",
+    "pocket_core": "up close + volume > max down-day volume in prior10 + close>MA50; cooldown20; price/volume approximation only",
+    "limitations": [
+      "Local symbol archive may have survivorship bias; no historical membership or ST flags.",
+      "Current pocket formula still omits turnover condition; historical float shares unavailable.",
+      "Core variant omits original fundamentals and qualitative patterns; not a full reproduction."
+    ]
+  },
+  "checks": {
+    "events": 57949,
+    "rel_shape": [
+      57949,
+      15
+    ],
+    "paths_match": true,
+    "selected_features_only_from_dev": true,
+    "future_path_not_in_t0_features": true
+  },
+  "code_sha256": "d121b02e43b812a4fc49d3ef6475a477027af6dba8ad18e45b80bff5c83d6c13"
+}

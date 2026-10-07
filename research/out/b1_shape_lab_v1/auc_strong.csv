@@ -1,0 +1,4 @@
+feature,contrast,auc,n,years_above_50pct,year_min,year_max
+amt_ratio,A1vsB,0.5756,25031,6/7,0.39,0.685
+amt_ratio,CvsD1,0.5573,24523,6/7,0.419,0.602
+rotation,A1vsC,0.5523,22731,6/7,0.483,0.626

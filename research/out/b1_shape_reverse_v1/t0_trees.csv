@@ -1,0 +1,56 @@
+contrast,features,test_auc,test_n,rules
+good_vs_bad,above_ma60|amv_wave_return|amv_wave_age|breadth_up|idx_ret20|idx_slope20|amv_trigger_return|amt_ratio,0.4845990487066112,28876,"|--- amv_trigger_return <= 0.05102
+|   |--- above_ma60 <= 0.58839
+|   |   |--- class: True
+|   |--- above_ma60 >  0.58839
+|   |   |--- class: False
+|--- amv_trigger_return >  0.05102
+|   |--- amv_trigger_return <= 0.05708
+|   |   |--- class: True
+|   |--- amv_trigger_return >  0.05708
+|   |   |--- class: True
+"
+A1_vs_C,amv_return_1d|amv_wave_age|above_ma60|amt_ratio|ret5|idx_vol20|dist_ma20|long_atr,0.5280801685839259,13212,"|--- idx_vol20 <= 0.01333
+|   |--- amt_ratio <= 0.97185
+|   |   |--- class: False
+|   |--- amt_ratio >  0.97185
+|   |   |--- class: False
+|--- idx_vol20 >  0.01333
+|   |--- above_ma60 <= 0.35168
+|   |   |--- class: True
+|   |--- above_ma60 >  0.35168
+|   |   |--- class: True
+"
+A1_vs_B,above_ma60|amv_wave_age|amv_wave_return|amv_trigger_return|idx_ret20|amt_ratio|amv_peak_drawdown|long_atr,0.49411737178606324,14929,"|--- amv_trigger_return <= 0.05102
+|   |--- above_ma60 <= 0.58839
+|   |   |--- class: True
+|   |--- above_ma60 >  0.58839
+|   |   |--- class: False
+|--- amv_trigger_return >  0.05102
+|   |--- amv_trigger_return <= 0.05708
+|   |   |--- class: True
+|   |--- amv_trigger_return >  0.05708
+|   |   |--- class: False
+"
+C_vs_D1,above_ma60|breadth_up|amv_wave_return|idx_slope20|idx_vol20|amv_wave_age|idx_ret20|range10,0.4739500194618618,13947,"|--- amv_wave_return <= 0.28423
+|   |--- amv_wave_return <= 0.02533
+|   |   |--- class: False
+|   |--- amv_wave_return >  0.02533
+|   |   |--- class: True
+|--- amv_wave_return >  0.28423
+|   |--- idx_vol20 <= 0.00917
+|   |   |--- class: False
+|   |--- idx_vol20 >  0.00917
+|   |   |--- class: False
+"
+B_vs_D1,idx_vol20|atr_pct|volatility20|range10|dist_high20|ret5|dist_high60|log_candidates_today,0.510725840173051,15664,"|--- atr_pct <= 0.05542
+|   |--- log_candidates_today <= 3.67622
+|   |   |--- class: False
+|   |--- log_candidates_today >  3.67622
+|   |   |--- class: False
+|--- atr_pct >  0.05542
+|   |--- idx_vol20 <= 0.01333
+|   |   |--- class: True
+|   |--- idx_vol20 >  0.01333
+|   |   |--- class: True
+"
