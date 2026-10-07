@@ -75,10 +75,12 @@ def run_engine(b, t, dstop, H, O, Hh, L, C):
             peak = np.where(live & (h > peak), h, peak)
             continue
         armed = live & (peak >= 1 + b)               # 用昨收前峰值
-        ts = live & (k + 1 == dstop) & ((peak - 1) < 0.03)      # B 时间止损(收盘判,含当日)
+        close_peak = np.maximum(peak, h)
+        ts = live & (k + 1 == dstop) & ((close_peak - 1) < 0.03)
         stop_lvl = np.where(armed, np.maximum(1.0, peak - t), 0.0)
-        gap = live & (stop_lvl > 0) & (o <= stop_lvl) & ~ts
-        intr = live & (stop_lvl > 0) & ~gap & (l <= stop_lvl) & ~ts
+        gap = live & (stop_lvl > 0) & (o <= stop_lvl)
+        intr = live & (stop_lvl > 0) & ~gap & (l <= stop_lvl)
+        ts &= ~gap & ~intr  # 盘中成交先于收盘时间退出
         fired = gap | intr | ts
         exit_px = np.where(fired, np.where(gap, o, np.where(intr, stop_lvl, C[:, k])), exit_px)
         exit_day = np.where(fired, k + 1, exit_day)
@@ -107,10 +109,10 @@ def main():
         N, (board == 0).sum(), (board == 1).sum(), (board == 2).sum()))
     # 无规则基准
     for H in (10, 15, 20):
-        r = C[:, H - 1] - 1.0
-        r = r[~np.isnan(r)]
+        valid = np.isfinite(C[:, H - 1])
+        r = C[valid, H - 1] * (1 - cost[valid]) - 1.0
         print("基准 持有%d日(无规则):净 %+.2f%% 胜率 %.1f%%" % (
-            H, 100 * (r * (1 - cost[:len(r)] if len(r) == len(cost) else 1)).mean(), 100 * (r > 0).mean()))
+            H, 100 * r.mean(), 100 * (r > 0).mean()))
     rows = []
     for b in (0.03, 0.05, 0.08):
         for t in (0.05, 0.08, 0.10):

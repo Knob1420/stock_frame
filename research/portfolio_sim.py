@@ -48,16 +48,10 @@ def run():
     open_pos = []     # [(sym, ep, slot, exit_date, path)]
     curve, taken = [], 0
     for d in cal:
-        # 到期平仓
-        still = []
-        for (sym, ep, slot, xd, path) in open_pos:
-            if d == xd:
-                cash += slot * (1 + path[d]) * (1 - COST)
-            else:
-                still.append((sym, ep, slot, xd, path))
-        open_pos = still
         # 开新仓(信号日为前一交易日,入场日=今日开盘);退出日=入场日起第15个交易日
         for key in entries.get(d, []):
+            if any(p[0] == key[0] for p in open_pos):
+                continue
             if len(open_pos) >= MAX_SLOTS:
                 break
             slot = equity / MAX_SLOTS
@@ -68,11 +62,20 @@ def run():
             xd = sorted(path)[14]                     # 第 15 个交易日收盘卖
             open_pos.append((key[0], key[1], slot, xd, path))
             taken += 1
+        # 到期平仓
+        still = []
+        for (sym, ep, slot, xd, path) in open_pos:
+            if d == xd:
+                cash += slot * (1 + path[d]) * (1 - COST)
+            else:
+                still.append((sym, ep, slot, xd, path))
+        open_pos = still
         # 盯市
         eq = cash
         for (sym, ep, slot, xd, path) in open_pos:
-            if d in path:
-                eq += slot * (1 + path[d]) * (1 - COST)
+            available = [day for day in path if day <= d]
+            mark = path[max(available)] if available else 0.0
+            eq += slot * (1 + mark) * (1 - COST)
         equity = eq
         curve.append((d, equity, len(open_pos)))
     df = pd.DataFrame(curve, columns=["date", "equity", "slots"]).set_index("date")
@@ -83,7 +86,7 @@ def run():
 def report(df, taken, total):
     e = df.equity
     yrs = (e.index[-1] - e.index[0]).days / 365.25
-    cagr = (e.iloc[-1] / e.iloc[0]) ** (1 / yrs) - 1
+    cagr = (e.iloc[-1] / CAPITAL) ** (1 / yrs) - 1
     dd = (e / e.cummax() - 1).min()
     print("回测区间 %s ~ %s(%.1f 年)" % (df.index[0].date(), df.index[-1].date(), yrs))
     print("期末权益 %.0f / 期初 %d | 总收益 %+.1f%% | 年化(CAGR) %+.2f%%" % (

@@ -125,11 +125,11 @@ def simulate(df, i, buy_lim=0.097, slip=0.001):
         if o[k] / entry - 1 <= SL:
             gross, why = o[k] / entry - 1, "跳空止损"
             break
-        if l[k] / entry - 1 <= SL:
-            gross, why = SL, "止损"
-            break
         if o[k] / entry - 1 >= TP:
             gross, why = o[k] / entry - 1, "跳空止盈"
+            break
+        if l[k] / entry - 1 <= SL:
+            gross, why = SL, "止损"
             break
         if h[k] / entry - 1 >= TP:
             gross, why = TP, "止盈"
